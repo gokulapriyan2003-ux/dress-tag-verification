@@ -303,24 +303,35 @@ def extract_style_and_size_from_sku(sku_str):
     if not sku or len(sku) < 8:
         return None, None
 
-    # 1. Extract Style
-    if len(sku) >= 7 and sku[2:4] == "OR" and sku[4:7].isdigit():
-        style = sku[2:7]
-        size_start = 10
-    else:
-        style = sku[2:6]
-        size_start = 9
+    size_tokens = [
+        "2XLR", "3XLR", "4XLR", "5XLR",
+        "5XL", "4XL", "3XL", "2XL", "XXL", "XLR", "SML", "MED", "LAR", "LRG",
+        "14Y", "12Y", "10Y", "08Y", "06Y",
+        "K12", "K11", "K10", "K09", "K08", "K07", "K06", "K05",
+        "Y12", "Y11", "Y10", "Y09", "Y08", "Y07", "Y06", "Y05",
+        "038", "036", "034", "032", "012", "145", "249", "058", "067", "889",
+        "32S", "34S", "36S",
+        "FSE", "EDP", "ARP", "LRP", "XLP", "MLP", "LWP", "2LL", "2YL", "3LL", "3YL",
+        "XL", "XS", "SM", "ME", "LA", "LR", "ML", "ED", "AR", "38", "36", "34", "32", "30",
+        "S", "M", "L"
+    ]
 
-    # 2. Extract Size
-    remainder = sku[size_start:]
-    sizes_ordered = ["5XL", "4XL", "3XL", "2XL", "XLR", "SML", "MED", "LAR", "XL", "XS", "S", "M", "L"]
-    matched_size = None
-    for sz in sizes_ordered:
-        if remainder.startswith(sz):
-            matched_size = sz
-            break
+    # Pattern: size_token followed optionally by specific known suffixes at the end
+    pattern = re.compile(
+        r'(?P<size>' + '|'.join(size_tokens) + r')(?:2PK|3PK|NEW|B\d{2}|P\d{2}|\d{1,2}P|\d{3})?$',
+        re.IGNORECASE
+    )
 
-    return style, matched_size
+    match = pattern.search(sku)
+    if match:
+        size_start = match.start('size')
+        extracted_size = match.group('size')
+        # Style starts at index 2 (skipping prefix) and ends 3 characters before size starts (skipping color)
+        extracted_style = sku[2 : size_start - 3]
+        return extracted_style, extracted_size
+
+    return None, None
+
 
 
 def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> pd.DataFrame:
