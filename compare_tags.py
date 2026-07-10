@@ -298,6 +298,31 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs):
     return None
 
 
+def extract_style_and_size_from_sku(sku_str):
+    sku = str(sku_str).strip().upper()
+    if not sku or len(sku) < 8:
+        return None, None
+
+    # 1. Extract Style
+    if len(sku) >= 7 and sku[2:4] == "OR" and sku[4:7].isdigit():
+        style = sku[2:7]
+        size_start = 10
+    else:
+        style = sku[2:6]
+        size_start = 9
+
+    # 2. Extract Size
+    remainder = sku[size_start:]
+    sizes_ordered = ["5XL", "4XL", "3XL", "2XL", "XLR", "SML", "MED", "LAR", "XL", "XS", "S", "M", "L"]
+    matched_size = None
+    for sz in sizes_ordered:
+        if remainder.startswith(sz):
+            matched_size = sz
+            break
+
+    return style, matched_size
+
+
 def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> pd.DataFrame:
     sku_col = find_col(excel_df, "SKU CODE", "SKU")
     barcode_col = find_col(excel_df, "BARCODE", "BAR CODE", "EAN", "GTIN")
@@ -346,6 +371,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
                 excel_val = get_updated_mrp(tag.get("Style"), tag.get("SKU"), gsheet_dfs)
                 if excel_val is None:
                     excel_val = excel_row.get(excel_col) if excel_col else None
+            elif field_name == "Size":
+                excel_sku = excel_row.get(sku_col)
+                _, extracted_size = extract_style_and_size_from_sku(excel_sku)
+                excel_val = extracted_size if extracted_size else None
             else:
                 if excel_col is None:
                     continue
