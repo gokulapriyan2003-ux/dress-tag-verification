@@ -362,6 +362,8 @@ def extract_style_and_size_from_sku(sku_str):
         apparel_sizes = {"MED", "LAR", "XLR", "2XL", "3XL", "4XL", "5XL", "SML"}
         if sku[-3:] in apparel_sizes:
             style = sku[2:-6]
+            if len(style) >= 3 and style[1:3] == "OR":
+                style = style[1:]
             size = sku[-3:]
             return style, size
 
