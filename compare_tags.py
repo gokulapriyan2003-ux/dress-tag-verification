@@ -358,6 +358,13 @@ def extract_style_and_size_from_sku(sku_str):
     if n not in rules:
         return None, None
 
+    if n == 15:
+        apparel_sizes = {"MED", "LAR", "XLR", "2XL", "3XL", "4XL", "5XL", "SML"}
+        if sku[-3:] in apparel_sizes:
+            style = sku[2:-6]
+            size = sku[-3:]
+            return style, size
+
     start_remove, style_len, end_remove = rules[n]
     body = sku[start_remove:]
     if end_remove:
@@ -367,6 +374,7 @@ def extract_style_and_size_from_sku(sku_str):
     size = body[-3:]
 
     return style, size
+
 
 
 
