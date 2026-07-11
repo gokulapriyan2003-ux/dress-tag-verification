@@ -190,6 +190,19 @@ def normalize_size(x):
     if x is None:
         return ""
     s = str(x).strip().upper()
+
+    if s.endswith("UK"):
+        s = s[:-2].strip()
+
+    if (s.startswith("K") or s.startswith("Y")) and len(s) >= 2 and s[1:].isdigit():
+        s = s[1:]
+
+    if s.isdigit():
+        s = str(int(s))
+
+    if len(s) == 3 and s[0].isalpha() and s[1:].isdigit():
+        s = str(int(s[1:]))
+
     size_map = {
         "SML": "S",
         "SMALL": "S",
@@ -209,10 +222,10 @@ def normalize_size(x):
         "XXXXL": "4XL",
         "4XL": "4XL",
         "5XLR": "5XL",
-
         "5XL": "5XL",
     }
     return size_map.get(s, s)
+
 
 
 def normalize_number(x):
@@ -300,37 +313,32 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs):
 
 def extract_style_and_size_from_sku(sku_str):
     sku = str(sku_str).strip().upper()
-    if not sku or len(sku) < 8:
+    n = len(sku)
+
+    rules = {
+        11: (2, 4, 0),
+        12: (2, 4, 0),
+        13: (2, 5, 0),
+        14: (2, 4, 2),
+        15: (2, 4, 3),
+        16: (2, 5, 3),
+        17: (2, 8, 0),
+        18: (3, 6, 3),
+    }
+
+    if n not in rules:
         return None, None
 
-    size_tokens = [
-        "2XLR", "3XLR", "4XLR", "5XLR",
-        "5XL", "4XL", "3XL", "2XL", "XXL", "XLR", "SML", "MED", "LAR", "LRG",
-        "14Y", "12Y", "10Y", "08Y", "06Y",
-        "K12", "K11", "K10", "K09", "K08", "K07", "K06", "K05",
-        "Y12", "Y11", "Y10", "Y09", "Y08", "Y07", "Y06", "Y05",
-        "038", "036", "034", "032", "012", "145", "249", "058", "067", "889",
-        "32S", "34S", "36S",
-        "FSE", "EDP", "ARP", "LRP", "XLP", "MLP", "LWP", "2LL", "2YL", "3LL", "3YL",
-        "XL", "XS", "SM", "ME", "LA", "LR", "ML", "ED", "AR", "38", "36", "34", "32", "30",
-        "S", "M", "L"
-    ]
+    start_remove, style_len, end_remove = rules[n]
+    body = sku[start_remove:]
+    if end_remove:
+        body = body[:-end_remove]
 
-    # Pattern: size_token followed optionally by specific known suffixes at the end
-    pattern = re.compile(
-        r'(?P<size>' + '|'.join(size_tokens) + r')(?:2PK|3PK|NEW|B\d{2}|P\d{2}|\d{1,2}P|\d{3})?$',
-        re.IGNORECASE
-    )
+    style = body[:style_len]
+    size = body[-3:]
 
-    match = pattern.search(sku)
-    if match:
-        size_start = match.start('size')
-        extracted_size = match.group('size')
-        # Style starts at index 2 (skipping prefix) and ends 3 characters before size starts (skipping color)
-        extracted_style = sku[2 : size_start - 3]
-        return extracted_style, extracted_size
+    return style, size
 
-    return None, None
 
 
 
