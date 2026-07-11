@@ -227,6 +227,35 @@ def normalize_size(x):
     return size_map.get(s, s)
 
 
+def format_size_as_tag(size_str):
+    if not size_str:
+        return size_str
+    s = str(size_str).strip().upper()
+
+    if (s.startswith("K") or s.startswith("Y")) and len(s) >= 2 and s[1:].isdigit():
+        digits_str = s[1:]
+        if len(digits_str) == 1:
+            digits_str = "0" + digits_str
+        return digits_str + "UK"
+
+    if len(s) == 3 and s[0].isalpha() and s[1:].isdigit():
+        return str(int(s[1:]))
+
+    size_map = {
+        "SML": "S",
+        "MED": "M",
+        "LAR": "L",
+        "XLR": "XL",
+        "2XLR": "2XL",
+        "XXL": "2XL",
+        "3XLR": "3XL",
+        "XXXL": "3XL",
+        "4XLR": "4XL",
+        "XXXXL": "4XL",
+        "5XLR": "5XL",
+    }
+    return size_map.get(s, s)
+
 
 def normalize_number(x):
     if x is None or x == "":
@@ -393,7 +422,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col)
                 _, extracted_size = extract_style_and_size_from_sku(excel_sku)
-                excel_val = extracted_size if extracted_size else None
+                excel_val = format_size_as_tag(extracted_size) if extracted_size else None
             else:
                 if excel_col is None:
                     continue
