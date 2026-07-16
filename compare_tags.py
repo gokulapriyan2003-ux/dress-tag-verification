@@ -352,7 +352,7 @@ def extract_style_and_size_from_sku(sku_str):
         15: (2, 4, 3),
         16: (2, 5, 3),
         17: (2, 8, 0),
-        18: (3, 6, 3),
+        18: (2, 4, 6) if sku.endswith(("2PK", "3PK")) else (3, 6, 3),
     }
 
     if n not in rules:
@@ -373,6 +373,8 @@ def extract_style_and_size_from_sku(sku_str):
         body = body[:-end_remove]
 
     style = body[:style_len]
+    if len(style) >= 3 and style[1:3] == "OR":
+        style = style[1:]
     size = body[-3:]
 
     return style, size
