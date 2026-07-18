@@ -191,6 +191,9 @@ def normalize_size(x):
         return ""
     s = str(x).strip().upper()
 
+    if "/" in s:
+        s = s.split("/")[0].strip()
+
     if s.endswith("UK"):
         s = s[:-2].strip()
 
