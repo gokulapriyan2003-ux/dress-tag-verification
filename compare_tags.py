@@ -270,7 +270,8 @@ color_map = {
     "GSE": "GREEN SMOKE", "SYM": "SMOKEY OLIVE", "CHA": "CHOCOLATE",
     "CTM": "CHOCOLATE TRUFFLE", "NYB": "NAVY BLUE", "LIB": "LIGHT BLUE",
     "SKO": "SMOKEY OLIVE", "OFW": "OFF WHITE", "OBR": "OX BLOOD RED",
-    "DDC": "DUSTY DEEP CHARCOAL", "CBL": "CARBON BLACK", "IRON GREY": "IRON GRAY"
+    "DDC": "DUSTY DEEP CHARCOAL", "CBL": "CARBON BLACK", "GFT": "GULF COAST",
+    "IRON GREY": "IRON GRAY"
 }
 
 
@@ -278,6 +279,9 @@ def normalize_color(x):
     if not x:
         return ""
     c = str(x).strip().upper().replace("GREY", "GRAY")
+    for suffix in [" PRO", " PLUS", " PREMIUM"]:
+        if c.endswith(suffix):
+            c = c[:-len(suffix)].strip()
     return color_map.get(c, c)
 
 
