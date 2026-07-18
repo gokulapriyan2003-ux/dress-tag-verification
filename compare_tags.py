@@ -1419,7 +1419,7 @@ def normalize_color(x):
     if not x:
         return ""
     c = str(x).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
-    for suffix in [" PRO", " PLUS", " PREMIUM"]:
+    for suffix in [" PRO", " PLUS", " PREMIUM", " NEO", " LITE", " MAX", " ULTRA"]:
         if c.endswith(suffix):
             c = c[:-len(suffix)].strip()
     res = color_map.get(c, c)
