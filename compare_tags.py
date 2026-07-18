@@ -260,6 +260,27 @@ def format_size_as_tag(size_str):
     return size_map.get(s, s)
 
 
+color_map = {
+    "OGY": "OYSTER GRAY", "MTG": "MINT GREEN", "CNG": "CHARCOAL GRAY",
+    "VIO": "VINTAGE INDIGO", "BLK": "BLACK", "NVY": "NAVY", "WHT": "WHITE",
+    "BRD": "BERRY RED", "WLG": "WOODLAND GRAY", "ASH": "ASH", "YLW": "YELLOW",
+    "CFK": "CHILI FLAKES", "BTE": "BEETLE", "IRG": "IRON GRAY", "ASC": "ASSORTED",
+    "IGM": "IRON GRAY MELANGE", "TRN": "TREKKING GREEN", "DPK": "DUSTY PINK",
+    "MYE": "MYRTLE", "BLE": "BLUE STONE", "GNB": "GREEN BOG", "NTC": "NORTH ATLANTIC",
+    "GSE": "GREEN SMOKE", "SYM": "SMOKEY OLIVE", "CHA": "CHOCOLATE",
+    "CTM": "CHOCOLATE TRUFFLE", "NYB": "NAVY BLUE", "LIB": "LIGHT BLUE",
+    "SKO": "SMOKEY OLIVE", "OFW": "OFF WHITE", "OBR": "OX BLOOD RED",
+    "DDC": "DUSTY DEEP CHARCOAL", "CBL": "CARBON BLACK", "IRON GREY": "IRON GRAY"
+}
+
+
+def normalize_color(x):
+    if not x:
+        return ""
+    c = str(x).strip().upper().replace("GREY", "GRAY")
+    return color_map.get(c, c)
+
+
 def normalize_number(x):
     if x is None or x == "":
         return None
@@ -343,7 +364,7 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs):
     return None
 
 
-def extract_style_and_size_from_sku(sku_str):
+def extract_sku_details(sku_str):
     sku = str(sku_str).strip().upper()
     n = len(sku)
 
@@ -359,7 +380,20 @@ def extract_style_and_size_from_sku(sku_str):
     }
 
     if n not in rules:
-        return None, None
+        return None, None, None
+
+    if n == 12:
+        body = sku[2:]
+        if len(body) >= 5 and body[:2].isalpha() and body[2:5].isdigit():
+            style_len = 5
+        else:
+            style_len = 4
+        style = body[:style_len]
+        if len(style) >= 3 and style[1:3] == "OR":
+            style = style[1:]
+        color = body[style_len:style_len+3]
+        size = body[style_len+3:]
+        return style, color, size
 
     if n == 15:
         apparel_sizes = {"MED", "LAR", "XLR", "2XL", "3XL", "4XL", "5XL", "SML"}
@@ -367,8 +401,9 @@ def extract_style_and_size_from_sku(sku_str):
             style = sku[2:-6]
             if len(style) >= 3 and style[1:3] == "OR":
                 style = style[1:]
+            color = sku[-6:-3]
             size = sku[-3:]
-            return style, size
+            return style, color, size
 
     start_remove, style_len, end_remove = rules[n]
     body = sku[start_remove:]
@@ -378,8 +413,14 @@ def extract_style_and_size_from_sku(sku_str):
     style = body[:style_len]
     if len(style) >= 3 and style[1:3] == "OR":
         style = style[1:]
+    color = body[style_len:style_len+3]
     size = body[-3:]
 
+    return style, color, size
+
+
+def extract_style_and_size_from_sku(sku_str):
+    style, color, size = extract_sku_details(sku_str)
     return style, size
 
 
@@ -404,7 +445,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
         ("Barcode", barcode_col, normalize_text),
         ("MRP", mrp_col, normalize_number),
         ("Size", size_col, normalize_size),
-        ("Color", color_col, normalize_text),
+        ("Color", color_col, normalize_color),
         ("Qty", qty_col, normalize_number),
     ]
 
@@ -436,8 +477,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
                     excel_val = excel_row.get(excel_col) if excel_col else None
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col)
-                _, extracted_size = extract_style_and_size_from_sku(excel_sku)
+                _, _, extracted_size = extract_sku_details(excel_sku)
                 excel_val = format_size_as_tag(extracted_size) if extracted_size else None
+            elif field_name == "Color":
+                if excel_col and pd.notna(excel_row.get(excel_col)):
+                    excel_val = excel_row.get(excel_col)
+                else:
+                    excel_sku = excel_row.get(sku_col)
+                    _, extracted_color, _ = extract_sku_details(excel_sku)
+                    excel_val = color_map.get(extracted_color, extracted_color) if extracted_color else None
             else:
                 if excel_col is None:
                     continue
