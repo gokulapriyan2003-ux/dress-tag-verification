@@ -1423,7 +1423,11 @@ def normalize_color(x):
         if c.endswith(suffix):
             c = c[:-len(suffix)].strip()
     res = color_map.get(c, c)
-    return str(res).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
+    res_str = str(res).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
+    for var_suffix in [" A", " B", " C", " D"]:
+        if res_str.endswith(var_suffix):
+            res_str = res_str[:-len(var_suffix)].strip()
+    return res_str
 
 
 def normalize_number(x):
