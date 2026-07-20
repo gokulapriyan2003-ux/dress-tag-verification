@@ -1419,7 +1419,8 @@ def normalize_color(x):
     if not x:
         return ""
     c = str(x).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
-    for suffix in [" PRO", " PLUS", " PREMIUM", " NEO", " LITE", " MAX", " ULTRA"]:
+    descriptors = [" PRO", " NEO", " PLUS", " PREMIUM", " LITE", " MAX", " ULTRA", " SPORT", " ACTIVE", " EDITION", " SERIES", " FIT", " CLASSIC", " FLEX", " PRIME", " STUDIO", " COLLECTION", " LINE", " AIR", " TECH", " DRY"]
+    for suffix in descriptors:
         if c.endswith(suffix):
             c = c[:-len(suffix)].strip()
     res = color_map.get(c, c)
@@ -1619,6 +1620,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
 
         for field_name, excel_col, norm_fn in field_map:
             pdf_val = tag.get(field_name)
+            excel_val = None
 
             if field_name == "MRP":
                 excel_val = get_updated_mrp(tag.get("Style"), tag.get("SKU"), gsheet_dfs)
@@ -1639,11 +1641,22 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
                 if excel_col is None:
                     continue
                 excel_val = excel_row.get(excel_col)
-
             pdf_norm = norm_fn(pdf_val)
             excel_norm = norm_fn(excel_val)
 
-            status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
+            if field_name == "Color":
+                is_match = (
+                    pdf_norm == excel_norm
+                    or (bool(pdf_norm) and bool(excel_norm) and (
+                        pdf_norm.startswith(excel_norm)
+                        or excel_norm.startswith(pdf_norm)
+                        or pdf_norm in excel_norm
+                        or excel_norm in pdf_norm
+                    ))
+                )
+                status = "✅ Match" if is_match else "❌ Mismatch"
+            else:
+                status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
             report_rows.append({
                 "SKU": tag["SKU"],
                 "Field": field_name,
