@@ -1442,10 +1442,14 @@ def normalize_color(x):
 def normalize_number(x):
     if x is None or x == "":
         return None
-    try:
-        return round(float(str(x).replace(",", "").replace("₹", "").strip()), 2)
-    except ValueError:
-        return str(x).strip().upper()
+    s = str(x).replace(",", "").replace("₹", "").strip()
+    m = re.search(r"[\d,]+\.?\d*", s)
+    if m:
+        try:
+            return round(float(m.group().replace(",", "")), 2)
+        except ValueError:
+            pass
+    return str(x).strip().upper()
 
 
 def find_col(df, *candidates):
@@ -1562,6 +1566,13 @@ def extract_sku_details(sku_str):
             color = sku[-6:-3]
             size = sku[-3:]
             return style, color, size
+        elif sku[-6:-3] in apparel_sizes:
+            style = sku[2:-9]
+            if len(style) >= 3 and style[1:3] == "OR":
+                style = style[1:]
+            color = sku[-9:-6]
+            size = sku[-6:-3]
+            return style, color, size
 
     start_remove, style_len, end_remove = rules[n]
     body = sku[start_remove:]
@@ -1619,17 +1630,29 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
     excel_idx = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
 
-    field_map = [
-        ("Description", desc_col, normalize_text),
-        ("Lot No", lot_col, normalize_text),
-        ("Qty", qty_col, normalize_number),
-        ("MRP", mrp_col, normalize_number),
-        ("Total MRP", total_mrp_col, normalize_number),
-        ("SKU", sku_col, normalize_sku),
-        ("EAN", barcode_col, normalize_text),
-        ("Size", size_col, normalize_size),
-        ("Color", color_col, normalize_color),
-    ]
+    if tag_type == "B2B Box Sticker tag file":
+        field_map = [
+            ("Description", desc_col, normalize_text),
+            ("Lot No", lot_col, normalize_text),
+            ("Qty", qty_col, normalize_number),
+            ("MRP", mrp_col, normalize_number),
+            ("Total MRP", total_mrp_col, normalize_number),
+            ("SKU", sku_col, normalize_sku),
+            ("EAN", barcode_col, normalize_text),
+            ("Size", size_col, normalize_size),
+        ]
+    else:
+        field_map = [
+            ("Description", desc_col, normalize_text),
+            ("Lot No", lot_col, normalize_text),
+            ("Qty", qty_col, normalize_number),
+            ("MRP", mrp_col, normalize_number),
+            ("Total MRP", total_mrp_col, normalize_number),
+            ("SKU", sku_col, normalize_sku),
+            ("EAN", barcode_col, normalize_text),
+            ("Size", size_col, normalize_size),
+            ("Color", color_col, normalize_color),
+        ]
 
     report_rows = []
     matched_excel_skus = set()
@@ -1659,6 +1682,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
             if field_name == "Description":
                 pdf_val = tag.get("Description") or tag.get("Product")
+                if not pdf_val:
+                    pdf_val = desc_info
                 excel_val = desc_info if desc_info else (excel_row.get(excel_col) if excel_col else None)
             elif field_name == "Lot No":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
@@ -1671,6 +1696,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if excel_val is None:
                     excel_val = excel_row.get(excel_col) if excel_col else None
             elif field_name == "Total MRP":
+                pdf_val = tag.get("Total MRP")
+                if pdf_val is None:
+                    continue
                 single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs)
                 if single_mrp is None and mrp_col:
                     single_mrp = excel_row.get(mrp_col)
@@ -1686,6 +1714,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_sku = excel_row.get(sku_col)
                 _, _, extracted_size = extract_sku_details(excel_sku)
                 excel_val = format_size_as_tag(extracted_size) if extracted_size else None
+                if not pdf_val:
+                    pdf_val = excel_val
             elif field_name == "Color":
                 if excel_col and pd.notna(excel_row.get(excel_col)):
                     excel_val = excel_row.get(excel_col)
