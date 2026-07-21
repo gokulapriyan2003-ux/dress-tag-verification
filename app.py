@@ -80,21 +80,23 @@ if default_xlsx:
 else:
     st.sidebar.warning("No local Excel found in directory.")
 
-# Custom File Uploaders & Tag Type Selection
-st.subheader("1. Select Reference Files & Tag Verification Mode")
-col1, col2, col3 = st.columns([1.5, 1.5, 1])
+# Step 1: Tag Verification Mode Selection (Placed BEFORE tag uploading)
+st.subheader("1. Select Tag Verification Mode")
+tag_type = st.selectbox(
+    "🏷️ Tag Verification Type",
+    options=["D2C Dress tag file", "B2B Box Sticker tag file"],
+    index=0,
+    help="Select 'D2C Dress tag file' for standard dress tags or 'B2B Box Sticker tag file' for B2B box stickers (verifying Lot No, Pack Qty, Total MRP, EAN, SKU)."
+)
+
+# Step 2: Reference File Uploaders
+st.subheader("2. Upload Reference Files")
+col1, col2 = st.columns(2)
 
 with col1:
     pdf_file = st.file_uploader("Upload Tag PDF (Optional, defaults to local file if empty)", type=["pdf"])
 with col2:
     xlsx_file = st.file_uploader("Upload Master Excel (Optional, defaults to local file if empty)", type=["xlsx"])
-with col3:
-    tag_type = st.selectbox(
-        "🏷️ Tag Verification Mode",
-        options=["Standard Garment / Dress Tags", "Outer Box Stickers"],
-        index=0,
-        help="Select 'Outer Box Stickers' to verify serialised box stickers with Lot No, Pack Qty, Total MRP, EAN, SKU, and Size."
-    )
 
 sheet_name = st.sidebar.text_input("Excel Sheet Name (Optional, uses first sheet if blank)", value="")
 
