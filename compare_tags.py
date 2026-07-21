@@ -28,12 +28,16 @@ import urllib.request
 # line on the label text itself to recover the N individual values in order.
 LABELS = [
     "Style:",
+    "Lot No:",
     "Product:",
     "Fit:",
     "Color:",
     "Category:",
     "Manufactured On:",
+    "MFD :",
     "Net Quantity:",
+    "Net Qty:",
+    "HSN Code:",
     "SKU Code:",
     "SIZE :",
     "MRP:",
@@ -110,14 +114,18 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         qty_raw = get("Qty:")
         qty_val = int(qty_raw) if qty_raw and qty_raw.isdigit() else qty_raw
 
+        style_raw = get("Style:") or get("Lot No:")
+        net_qty_raw = get("Net Quantity:") or get("Net Qty:")
+        mfd_raw = get("Manufactured On:") or get("MFD :")
+
         rows.append({
-            "Style": get("Style:"),
+            "Style": style_raw,
             "Product": get("Product:"),
             "Fit": get("Fit:"),
             "Color": get("Color:"),
             "Category": get("Category:"),
-            "Manufactured On": get("Manufactured On:"),
-            "Net Quantity": get("Net Quantity:"),
+            "Manufactured On": mfd_raw,
+            "Net Quantity": net_qty_raw,
             "SKU": get("SKU Code:"),
             "Size": get("SIZE :"),
             "Size(CM)": cm_sizes[i] if i < len(cm_sizes) else None,
@@ -1569,6 +1577,24 @@ def extract_sku_details(sku_str):
     return style, color, size
 
 
+def parse_product_name_info(prod_name_str):
+    if not prod_name_str:
+        return "", "", "", None
+    parts = str(prod_name_str).strip().split()
+    lot_no = parts[0] if parts else ""
+    base_style = lot_no.split("/")[0] if "/" in lot_no else lot_no
+
+    pcs_match = re.search(r"(\d+)\s*PCS", str(prod_name_str), re.IGNORECASE)
+    pcs_qty = int(pcs_match.group(1)) if pcs_match else None
+
+    desc = " ".join(parts[1:])
+    if pcs_match:
+        desc = desc.split(pcs_match.group(0))[0].strip()
+    desc = re.sub(r"\s+(ASSORTED|BLACK|NAVY|GREY|GRAY|WHITE)$", "", desc, flags=re.IGNORECASE).strip()
+
+    return lot_no, base_style, desc, pcs_qty
+
+
 def extract_style_and_size_from_sku(sku_str):
     style, color, size = extract_sku_details(sku_str)
     return style, size
@@ -1578,12 +1604,15 @@ def extract_style_and_size_from_sku(sku_str):
 
 
 def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> pd.DataFrame:
+    desc_col = find_col(excel_df, "PRODUCT NAME", "DESCRIPTION", "PRODUCT")
+    lot_col = find_col(excel_df, "LOT NO", "LOT", "STYLE", "STYLE CODE")
     sku_col = find_col(excel_df, "SKU CODE", "SKU")
     barcode_col = find_col(excel_df, "BARCODE", "BAR CODE", "EAN", "GTIN")
     mrp_col = find_col(excel_df, "MRP")
+    total_mrp_col = find_col(excel_df, "TOTAL MRP")
     size_col = find_col(excel_df, "SIZE")
     color_col = find_col(excel_df, "COLOUR", "COLOR")
-    qty_col = find_col(excel_df, "TAG QTY", "QTY")
+    qty_col = find_col(excel_df, "PACK QTY", "NET QTY", "QTY", "TAG QTY")
 
     if sku_col is None:
         raise ValueError("Could not find an SKU column in the Excel sheet.")
@@ -1591,12 +1620,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
     excel_idx = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
 
     field_map = [
-        ("SKU", sku_col, normalize_sku),
-        ("Barcode", barcode_col, normalize_text),
+        ("Description", desc_col, normalize_text),
+        ("Lot No", lot_col, normalize_text),
+        ("Qty", qty_col, normalize_number),
         ("MRP", mrp_col, normalize_number),
+        ("Total MRP", total_mrp_col, normalize_number),
+        ("SKU", sku_col, normalize_sku),
+        ("EAN", barcode_col, normalize_text),
         ("Size", size_col, normalize_size),
         ("Color", color_col, normalize_color),
-        ("Qty", qty_col, normalize_number),
     ]
 
     report_rows = []
@@ -1618,13 +1650,37 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
 
         matched_excel_skus.add(pdf_sku_norm)
 
+        prod_name_val = excel_row.get(desc_col) if desc_col else None
+        lot_info, base_style_info, desc_info, pack_qty_info = parse_product_name_info(prod_name_val)
+
         for field_name, excel_col, norm_fn in field_map:
             pdf_val = tag.get(field_name)
             excel_val = None
 
-            if field_name == "MRP":
-                excel_val = get_updated_mrp(tag.get("Style"), tag.get("SKU"), gsheet_dfs)
+            if field_name == "Description":
+                pdf_val = tag.get("Description") or tag.get("Product")
+                excel_val = desc_info if desc_info else (excel_row.get(excel_col) if excel_col else None)
+            elif field_name == "Lot No":
+                pdf_val = tag.get("Lot No") or tag.get("Style")
+                excel_val = lot_info if lot_info else (excel_row.get(excel_col) if excel_col else None)
+            elif field_name == "Qty":
+                pdf_val = tag.get("Net Quantity") or tag.get("Qty")
+                excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else None)
+            elif field_name == "MRP":
+                excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs)
                 if excel_val is None:
+                    excel_val = excel_row.get(excel_col) if excel_col else None
+            elif field_name == "Total MRP":
+                single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs)
+                if single_mrp is None and mrp_col:
+                    single_mrp = excel_row.get(mrp_col)
+                p_qty = norm_fn(tag.get("Net Quantity") or tag.get("Qty")) or pack_qty_info or 1
+                if single_mrp and p_qty:
+                    try:
+                        excel_val = float(single_mrp) * float(p_qty)
+                    except (ValueError, TypeError):
+                        excel_val = None
+                else:
                     excel_val = excel_row.get(excel_col) if excel_col else None
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col)
@@ -1637,14 +1693,36 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> p
                     excel_sku = excel_row.get(sku_col)
                     _, extracted_color, _ = extract_sku_details(excel_sku)
                     excel_val = color_map.get(extracted_color, extracted_color) if extracted_color else None
+            elif field_name == "EAN":
+                pdf_val = tag.get("EAN") or tag.get("Barcode")
+                excel_val = excel_row.get(barcode_col) if barcode_col else None
             else:
                 if excel_col is None:
                     continue
                 excel_val = excel_row.get(excel_col)
+
             pdf_norm = norm_fn(pdf_val)
             excel_norm = norm_fn(excel_val)
 
-            if field_name == "Color":
+            if field_name == "Description":
+                p_words = set(re.findall(r"\w+", str(pdf_norm).upper()))
+                e_words = set(re.findall(r"\w+", str(excel_norm).upper()))
+                common_words = p_words.intersection(e_words)
+                is_match = (
+                    pdf_norm == excel_norm
+                    or len(common_words) >= 2
+                    or (bool(pdf_norm) and bool(excel_norm) and (
+                        pdf_norm in excel_norm
+                        or excel_norm in pdf_norm
+                    ))
+                )
+                status = "✅ Match" if is_match else "❌ Mismatch"
+            elif field_name == "Lot No":
+                p_b = str(pdf_norm).split("/")[0] if "/" in str(pdf_norm) else str(pdf_norm)
+                e_b = str(excel_norm).split("/")[0] if "/" in str(excel_norm) else str(excel_norm)
+                is_match = (pdf_norm == excel_norm or p_b == e_b)
+                status = "✅ Match" if is_match else "❌ Mismatch"
+            elif field_name == "Color":
                 is_match = (
                     pdf_norm == excel_norm
                     or (bool(pdf_norm) and bool(excel_norm) and (
