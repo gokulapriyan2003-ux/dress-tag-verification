@@ -17,7 +17,6 @@ from compare_tags import (
 
 st.set_page_config(
     page_title="Dress Tag Verifier",
-    page_icon="👗",
     layout="wide"
 )
 
@@ -56,7 +55,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">👗 Dress Tag & Master Sheet Verifier</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">Dress Tag & Master Sheet Verifier</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Extract SKU fields from multi-tag PDF and validate them against Excel & Google Sheet references</div>', unsafe_allow_html=True)
 
 # Auto-detect local files
@@ -68,7 +67,7 @@ default_pdf = os.path.join(script_dir, local_pdfs[0]) if local_pdfs else None
 default_xlsx = os.path.join(script_dir, local_xlsxs[0]) if local_xlsxs else None
 
 # Layout: Sidebar configuration
-st.sidebar.header("📁 Configuration & Local Files")
+st.sidebar.header("Configuration & Local Files")
 st.sidebar.markdown("### Auto-detected files:")
 if default_pdf:
     st.sidebar.success(f"PDF found: `{os.path.basename(default_pdf)}`")
@@ -83,7 +82,7 @@ else:
 # Step 1: Tag Verification Mode Selection (Placed BEFORE tag uploading)
 st.subheader("1. Select Tag Verification Mode")
 tag_type = st.selectbox(
-    "🏷️ Tag Verification Type",
+    "Tag Verification Type",
     options=["D2C Dress tag file", "B2B Box Sticker tag file"],
     index=0,
     help="Select 'D2C Dress tag file' for standard dress tags or 'B2B Box Sticker tag file' for B2B box stickers (verifying Lot No, Pack Qty, Total MRP, EAN, SKU)."
@@ -119,7 +118,7 @@ elif default_xlsx:
     target_xlsx = default_xlsx
 
 # Run Verification Button
-if st.button("🚀 Run Verification", type="primary"):
+if st.button("Run Verification", type="primary"):
     if not target_pdf:
         st.error("Please upload a PDF file or place one in the script directory.")
     elif not target_xlsx:
@@ -139,9 +138,9 @@ if st.button("🚀 Run Verification", type="primary"):
                 xls = pd.ExcelFile(gsheet_path)
                 for name in xls.sheet_names:
                     gsheet_dfs[name] = pd.read_excel(xls, sheet_name=name)
-                st.success("✅ Downloaded latest MRP Google Sheet successfully.")
+                st.success("Downloaded latest MRP Google Sheet successfully.")
             except Exception as e:
-                st.warning(f"⚠️ Could not download updated MRP Google Sheet ({e}). Falling back to local Excel values.")
+                st.warning(f"Could not download updated MRP Google Sheet ({e}). Falling back to local Excel values.")
 
             # Load files
             try:
@@ -156,7 +155,7 @@ if st.button("🚀 Run Verification", type="primary"):
                 success_rate = round(((n_total - n_mismatch) / n_total) * 100, 1) if n_total > 0 else 0
                 
                 # Display Metrics
-                st.subheader("📊 Verification Summary")
+                st.subheader("Verification Summary")
                 m_col1, m_col2, m_col3 = st.columns(3)
                 with m_col1:
                     st.markdown(f"""
@@ -202,14 +201,14 @@ if st.button("🚀 Run Verification", type="primary"):
                             ws.cell(row=row_idx, column=col_idx).fill = fill
                     wb.save(out_path)
                 except PermissionError:
-                    st.error(f"❌ Permission denied when writing to '{out_path}'. Please make sure it is closed in Microsoft Excel and try again.")
+                    st.error(f"Permission denied when writing to '{out_path}'. Please make sure it is closed in Microsoft Excel and try again.")
                 
                 # Show results
                 if n_mismatch == 0:
                     st.balloons()
-                    st.success("🎉 All field checks passed successfully! EAN Barcode, Sizes, and MRP values are 100% accurate.")
+                    st.success("All field checks passed successfully! EAN Barcode, Sizes, and MRP values are 100% accurate.")
                 else:
-                    st.error(f"❌ Found {n_mismatch} mismatches. Please check the report or view details below.")
+                    st.error(f"Found {n_mismatch} mismatches. Please check the report or view details below.")
                     mismatch_df = report_df[report_df["Status"] != "✅ Match"]
                     st.dataframe(mismatch_df, use_container_width=True)
 
@@ -217,14 +216,14 @@ if st.button("🚀 Run Verification", type="primary"):
                 if os.path.exists(out_path):
                     with open(out_path, "rb") as file:
                         btn = st.download_button(
-                            label="📥 Download Excel Comparison Report",
+                            label="Download Excel Comparison Report",
                             data=file,
                             file_name="tag_comparison_report.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 
                 # Show full comparison table
-                with st.expander("🔍 View Full Comparison Report Details"):
+                with st.expander("View Full Comparison Report Details"):
                     st.dataframe(report_df, use_container_width=True)
                     
             except Exception as ex:
