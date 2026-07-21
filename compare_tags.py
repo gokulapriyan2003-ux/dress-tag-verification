@@ -59,15 +59,13 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     field_lists = {lbl: [] for lbl in LABELS}
     barcodes = []
     cm_sizes = []
+    descriptions = []
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
-            for raw_line in text.split("\n"):
-                line = raw_line.strip()
-                if not line:
-                    continue
-
+            raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
+            for idx_line, line in enumerate(raw_lines):
                 matched_label = None
                 for lbl in LABELS:
                     if line.startswith(lbl):
@@ -75,6 +73,18 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                         break
 
                 if matched_label:
+                    if matched_label == "Lot No:" and idx_line > 0:
+                        prev_line = raw_lines[idx_line - 1]
+                        lots_count = len(split_repeated_label(line, "Lot No:"))
+                        if "Lot No:" not in prev_line and not any(prev_line.startswith(x) for x in LABELS):
+                            parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
+                            if len(parts) == lots_count:
+                                descriptions.extend(parts)
+                            else:
+                                chunk_len = max(1, len(prev_line) // lots_count)
+                                single_desc = prev_line[:chunk_len].strip()
+                                descriptions.extend([single_desc] * lots_count)
+
                     field_lists[matched_label].extend(
                         split_repeated_label(line, matched_label)
                     )
@@ -117,17 +127,25 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         style_raw = get("Style:") or get("Lot No:")
         net_qty_raw = get("Net Quantity:") or get("Net Qty:")
         mfd_raw = get("Manufactured On:") or get("MFD :")
+        sku_val = get("SKU Code:")
+        desc_val = get("Product:") or (descriptions[i] if i < len(descriptions) else None)
+        size_val = get("SIZE :")
+        if not size_val and sku_val:
+            _, _, ext_sz = extract_sku_details(sku_val)
+            if ext_sz:
+                size_val = format_size_as_tag(ext_sz)
 
         rows.append({
             "Style": style_raw,
-            "Product": get("Product:"),
+            "Product": desc_val,
+            "Description": desc_val,
             "Fit": get("Fit:"),
             "Color": get("Color:"),
             "Category": get("Category:"),
             "Manufactured On": mfd_raw,
             "Net Quantity": net_qty_raw,
-            "SKU": get("SKU Code:"),
-            "Size": get("SIZE :"),
+            "SKU": sku_val,
+            "Size": size_val,
             "Size(CM)": cm_sizes[i] if i < len(cm_sizes) else None,
             "Barcode": barcodes[i] if i < len(barcodes) else None,
             "MRP": mrp_val,
