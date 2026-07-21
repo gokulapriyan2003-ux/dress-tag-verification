@@ -1603,7 +1603,7 @@ def extract_style_and_size_from_sku(sku_str):
 
 
 
-def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict) -> pd.DataFrame:
+def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_type: str = "Standard Garment / Dress Tags") -> pd.DataFrame:
     desc_col = find_col(excel_df, "PRODUCT NAME", "DESCRIPTION", "PRODUCT")
     lot_col = find_col(excel_df, "LOT NO", "LOT", "STYLE", "STYLE CODE")
     sku_col = find_col(excel_df, "SKU CODE", "SKU")

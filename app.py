@@ -80,14 +80,21 @@ if default_xlsx:
 else:
     st.sidebar.warning("No local Excel found in directory.")
 
-# Custom File Uploaders
-st.subheader("1. Select Reference Files")
-col1, col2 = st.columns(2)
+# Custom File Uploaders & Tag Type Selection
+st.subheader("1. Select Reference Files & Tag Verification Mode")
+col1, col2, col3 = st.columns([1.5, 1.5, 1])
 
 with col1:
     pdf_file = st.file_uploader("Upload Tag PDF (Optional, defaults to local file if empty)", type=["pdf"])
 with col2:
     xlsx_file = st.file_uploader("Upload Master Excel (Optional, defaults to local file if empty)", type=["xlsx"])
+with col3:
+    tag_type = st.selectbox(
+        "🏷️ Tag Verification Mode",
+        options=["Standard Garment / Dress Tags", "Outer Box Stickers"],
+        index=0,
+        help="Select 'Outer Box Stickers' to verify serialised box stickers with Lot No, Pack Qty, Total MRP, EAN, SKU, and Size."
+    )
 
 sheet_name = st.sidebar.text_input("Excel Sheet Name (Optional, uses first sheet if blank)", value="")
 
@@ -140,7 +147,7 @@ if st.button("🚀 Run Verification", type="primary"):
                 excel_df = extract_excel_master(target_xlsx, sheet_name if sheet_name else None)
                 
                 # Perform comparison
-                report_df = compare(pdf_df, excel_df, gsheet_dfs)
+                report_df = compare(pdf_df, excel_df, gsheet_dfs, tag_type=tag_type)
                 
                 n_mismatch = (report_df["Status"] != "✅ Match").sum()
                 n_total = len(report_df)
