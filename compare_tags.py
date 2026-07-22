@@ -1523,6 +1523,52 @@ def clean_style_for_gsheet(style):
     return s
 
 
+def match_style_and_batch(pdf_lot, gs_val, tag_type="Standard Garment / Dress Tags"):
+    p_lot = str(pdf_lot).strip().upper()
+    g_val = str(gs_val).strip().upper()
+    
+    if p_lot == g_val:
+        return True
+        
+    p_parts = p_lot.split("/")
+    g_parts = g_val.split("/")
+    
+    p_style = p_parts[0]
+    p_batch = p_parts[1].strip() if len(p_parts) > 1 else ""
+    
+    g_style = g_parts[0]
+    g_batch = g_parts[1].strip() if len(g_parts) > 1 else ""
+    
+    # Prefix check for D2C mode to prevent matching OR10 to P102
+    if tag_type == "D2C Dress tag file":
+        p_prefix = "".join([c for c in p_style if c.isalpha()])
+        g_prefix = "".join([c for c in g_style if c.isalpha()])
+        if p_prefix and g_prefix and p_prefix != g_prefix:
+            if not ((p_prefix == "S" and g_prefix == "WS") or (p_prefix == "WS" and g_prefix == "S")):
+                return False
+                
+    p_style_digits = "".join([c for c in p_style if c.isdigit()])
+    g_style_digits = "".join([c for c in g_style if c.isdigit()])
+    
+    if p_style_digits != g_style_digits:
+        return False
+        
+    if p_batch and g_batch:
+        p_batch_digits = "".join([c for c in p_batch if c.isdigit()])
+        g_batch_digits = "".join([c for c in g_batch if c.isdigit()])
+        if p_batch_digits and g_batch_digits:
+            try:
+                if int(p_batch_digits) == int(g_batch_digits):
+                    return True
+            except ValueError:
+                pass
+        if p_batch in g_batch or g_batch in p_batch:
+            return True
+        return False
+        
+    return True
+
+
 def find_mrp_by_style_digits(style_clean, df, col_name, tag_type="Standard Garment / Dress Tags"):
     s_clean = str(style_clean).strip().upper()
     if "/" in s_clean:
@@ -1545,17 +1591,26 @@ def find_mrp_by_style_digits(style_clean, df, col_name, tag_type="Standard Garme
         if pd.notna(mrp_val):
             return mrp_val
 
-    # 3. Digit-based lookup fallback (ONLY for B2B Box Stickers!)
-    if tag_type == "B2B Box Sticker tag file":
-        for _, row in df.iterrows():
-            gs_style = str(row.get(col_name, "")).strip().upper()
-            if "/" in gs_style:
-                gs_style = gs_style.split("/")[0].strip()
-            gs_digits = "".join([c for c in gs_style if c.isdigit()])
-            if gs_digits == s_digits:
+    # 3. Style + Batch match fallback
+    for _, row in df.iterrows():
+        gs_style = str(row.get(col_name, "")).strip().upper()
+        if gs_style and gs_style != "NAN":
+            if match_style_and_batch(style_clean, gs_style, tag_type):
                 mrp_val = row.get("MRP")
                 if pd.notna(mrp_val):
                     return mrp_val
+                    
+    # Check STYLE NO column direct fallback
+    style_col = "STYLE NO"
+    if style_col in df.columns:
+        for _, row in df.iterrows():
+            gs_s = str(row.get(style_col, "")).strip().upper()
+            if gs_s and gs_s != "NAN":
+                if match_style_and_batch(style_clean, gs_s, tag_type):
+                    mrp_val = row.get("MRP")
+                    if pd.notna(mrp_val):
+                        return mrp_val
+                        
     return None
 
 
