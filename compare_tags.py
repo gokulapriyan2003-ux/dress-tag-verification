@@ -1589,6 +1589,84 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment /
     return None
 
 
+def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+
+    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
+    sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
+
+    if not style_clean and sku_clean:
+        extracted_style, _, _ = extract_sku_details(sku_clean)
+        style_clean = extracted_style if extracted_style else ""
+
+    style_clean = clean_style_for_gsheet(style_clean)
+
+    # 1. Search in DT FINAL MRP
+    df_dt = gsheet_dfs.get("DT FINAL MRP")
+    if df_dt is not None and len(df_dt.columns) > 7:
+        col_h = df_dt.columns[7]
+        s_clean = style_clean.split("/")[0].strip() if "/" in style_clean else style_clean
+        s_digits = "".join([c for c in s_clean if c.isdigit()])
+        
+        # Exact/Base Match first
+        match = df_dt[df_dt[col_h].astype(str).str.strip().str.upper() == style_clean]
+        if not match.empty:
+            desc = match.iloc[0].get("DESCRIPTION")
+            if pd.notna(desc):
+                return str(desc).strip()
+        match = df_dt[df_dt[col_h].astype(str).str.strip().str.upper() == s_clean]
+        if not match.empty:
+            desc = match.iloc[0].get("DESCRIPTION")
+            if pd.notna(desc):
+                return str(desc).strip()
+                
+        # Digit match (B2B only)
+        if tag_type == "B2B Box Sticker tag file" and s_digits:
+            for _, row in df_dt.iterrows():
+                gs_style = str(row.get(col_h, "")).strip().upper()
+                if "/" in gs_style:
+                    gs_style = gs_style.split("/")[0].strip()
+                gs_digits = "".join([c for c in gs_style if c.isdigit()])
+                if gs_digits == s_digits:
+                    desc = row.get("DESCRIPTION")
+                    if pd.notna(desc):
+                        return str(desc).strip()
+
+    # 2. Search in New MRP 26-27
+    df_new = gsheet_dfs.get("New MRP 26-27")
+    if df_new is not None and len(df_new.columns) > 8:
+        col_i = df_new.columns[8]
+        s_clean = style_clean.split("/")[0].strip() if "/" in style_clean else style_clean
+        s_digits = "".join([c for c in s_clean if c.isdigit()])
+        
+        # Exact/Base Match first
+        match = df_new[df_new[col_i].astype(str).str.strip().str.upper() == style_clean]
+        if not match.empty:
+            desc = match.iloc[0].get("DESCRIPTION")
+            if pd.notna(desc):
+                return str(desc).strip()
+        match = df_new[df_new[col_i].astype(str).str.strip().str.upper() == s_clean]
+        if not match.empty:
+            desc = match.iloc[0].get("DESCRIPTION")
+            if pd.notna(desc):
+                return str(desc).strip()
+                
+        # Digit match (B2B only)
+        if tag_type == "B2B Box Sticker tag file" and s_digits:
+            for _, row in df_new.iterrows():
+                gs_style = str(row.get(col_i, "")).strip().upper()
+                if "/" in gs_style:
+                    gs_style = gs_style.split("/")[0].strip()
+                gs_digits = "".join([c for c in gs_style if c.isdigit()])
+                if gs_digits == s_digits:
+                    desc = row.get("DESCRIPTION")
+                    if pd.notna(desc):
+                        return str(desc).strip()
+
+    return None
+
+
 def extract_sku_details(sku_str):
     sku = str(sku_str).strip().upper()
     n = len(sku)
@@ -1808,6 +1886,23 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         or excel_norm in pdf_norm
                     ))
                 )
+                if not is_match:
+                    g_desc = get_updated_description(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                    if g_desc:
+                        g_norm = norm_fn(g_desc)
+                        g_words = set(re.findall(r"\w+", str(g_norm).upper()))
+                        common_g_words = p_words.intersection(g_words)
+                        if (
+                            pdf_norm == g_norm
+                            or len(common_g_words) >= 2
+                            or (bool(pdf_norm) and bool(g_norm) and (
+                                pdf_norm in g_norm
+                                or g_norm in pdf_norm
+                            ))
+                        ):
+                            is_match = True
+                            excel_val = g_desc
+                            excel_norm = g_norm
                 status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "Lot No":
                 p_b = str(pdf_norm).split("/")[0] if "/" in str(pdf_norm) else str(pdf_norm)
