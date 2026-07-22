@@ -1494,12 +1494,29 @@ def find_col(df, *candidates):
     return None
 
 
+def clean_style_for_gsheet(style):
+    if not style:
+        return ""
+    s = str(style).strip().upper()
+    if s.startswith("OR"):
+        s = s[1:]
+    elif s.startswith("SOR"):
+        s = s[2:]
+    return s
+
+
 def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs):
     if not gsheet_dfs:
         return None
 
     style_clean = str(pdf_style).strip().upper() if pdf_style else ""
     sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
+
+    if not style_clean and sku_clean:
+        extracted_style, _, _ = extract_sku_details(sku_clean)
+        style_clean = extracted_style if extracted_style else ""
+
+    style_clean = clean_style_for_gsheet(style_clean)
 
     # 1. Search in DT FINAL MRP (matching against Column H (8th column, index 7))
     df_dt = gsheet_dfs.get("DT FINAL MRP")
@@ -1653,7 +1670,6 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Description", desc_col, normalize_text),
             ("Lot No", lot_col, normalize_text),
             ("Qty", qty_col, normalize_number),
-            ("MRP", mrp_col, normalize_number),
             ("Total MRP", total_mrp_col, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
