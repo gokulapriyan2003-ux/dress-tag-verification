@@ -1833,7 +1833,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Description", desc_col, normalize_text),
             ("Lot No", lot_col, normalize_text),
             ("Qty", qty_col, normalize_number),
-            ("Total MRP", total_mrp_col, normalize_number),
+            ("Total MRP (Google Sheet)", None, normalize_number),
+            ("Total MRP (GS1 Master)", total_mrp_col, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
@@ -1843,8 +1844,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Description", desc_col, normalize_text),
             ("Lot No", lot_col, normalize_text),
             ("Qty", qty_col, normalize_number),
-            ("MRP", mrp_col, normalize_number),
-            ("Total MRP", total_mrp_col, normalize_number),
+            ("MRP (Google Sheet)", None, normalize_number),
+            ("MRP (GS1 Master)", mrp_col, normalize_number),
+            ("Total MRP (Google Sheet)", None, normalize_number),
+            ("Total MRP (GS1 Master)", total_mrp_col, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
@@ -1874,6 +1877,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         lot_info, base_style_info, desc_info, pack_qty_info = parse_product_name_info(prod_name_val)
 
         for field_name, excel_col, norm_fn in field_map:
+            if excel_col is None and field_name.endswith("(GS1 Master)"):
+                continue
+
             pdf_val = tag.get(field_name)
             excel_val = None
 
@@ -1888,25 +1894,33 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
-            elif field_name == "MRP":
+            elif field_name == "MRP (Google Sheet)":
+                pdf_val = tag.get("MRP")
                 excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
-                if excel_val is None:
-                    excel_val = excel_row.get(excel_col) if excel_col else None
-            elif field_name == "Total MRP":
+            elif field_name == "MRP (GS1 Master)":
+                pdf_val = tag.get("MRP")
+                excel_val = excel_row.get(excel_col) if excel_col else None
+            elif field_name == "Total MRP (Google Sheet)":
                 pdf_val = tag.get("Total MRP")
                 if pdf_val is None:
                     continue
                 single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
-                if single_mrp is None and mrp_col:
-                    single_mrp = excel_row.get(mrp_col)
-                p_qty = norm_fn(tag.get("Net Quantity") or tag.get("Qty")) or pack_qty_info or 1
+                if tag_type == "B2B Box Sticker tag file":
+                    p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
+                else:
+                    p_qty = norm_fn(tag.get("Qty") or tag.get("Net Quantity")) or 1.0
                 if single_mrp and p_qty:
                     try:
                         excel_val = float(single_mrp) * float(p_qty)
                     except (ValueError, TypeError):
                         excel_val = None
                 else:
-                    excel_val = excel_row.get(excel_col) if excel_col else None
+                    excel_val = None
+            elif field_name == "Total MRP (GS1 Master)":
+                pdf_val = tag.get("Total MRP")
+                if pdf_val is None:
+                    continue
+                excel_val = excel_row.get(excel_col) if excel_col else None
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col)
                 _, _, extracted_size = extract_sku_details(excel_sku)
