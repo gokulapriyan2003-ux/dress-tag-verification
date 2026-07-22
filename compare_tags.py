@@ -1676,6 +1676,36 @@ def find_mrp_by_style_digits(style_clean, df, col_name, tag_type="Standard Garme
     return None
 
 
+def append_sku_batch_to_style(pdf_style, pdf_sku):
+    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
+    sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
+
+    if "/" not in style_clean and sku_clean:
+        try:
+            n = len(sku_clean)
+            rules = {
+                11: (2, 4, 0),
+                12: (2, 4, 0),
+                13: (2, 5, 0),
+                14: (2, 4, 2),
+                15: (2, 4, 3),
+                16: (2, 5, 3),
+                17: (2, 8, 0),
+                18: (3, 6, 3),
+            }
+            if n in rules:
+                _, _, end_remove = rules[n]
+                if end_remove > 0:
+                    suffix = sku_clean[-end_remove:]
+                    suffix_digits = "".join([c for c in suffix if c.isdigit()])
+                    if suffix_digits:
+                        batch_val = str(int(suffix_digits))
+                        style_clean = f"{style_clean}/{batch_val}"
+        except Exception:
+            pass
+    return style_clean
+
+
 def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
     if not gsheet_dfs:
         return None
@@ -1687,6 +1717,7 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment /
         extracted_style, _, _ = extract_sku_details(sku_clean)
         style_clean = extracted_style if extracted_style else ""
 
+    style_clean = append_sku_batch_to_style(style_clean, sku_clean)
     style_clean = clean_style_for_gsheet(style_clean)
     sku_gender = detect_gender_from_sku(sku_clean)
 
@@ -1720,6 +1751,7 @@ def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
         extracted_style, _, _ = extract_sku_details(sku_clean)
         style_clean = extracted_style if extracted_style else ""
 
+    style_clean = append_sku_batch_to_style(style_clean, sku_clean)
     style_clean = clean_style_for_gsheet(style_clean)
 
     # 1. Search in DT FINAL MRP
