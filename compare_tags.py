@@ -1521,7 +1521,43 @@ def clean_style_for_gsheet(style):
     return s
 
 
-def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs):
+def find_mrp_by_style_digits(style_clean, df, col_name, tag_type="Standard Garment / Dress Tags"):
+    s_clean = str(style_clean).strip().upper()
+    if "/" in s_clean:
+        s_clean = s_clean.split("/")[0].strip()
+    s_digits = "".join([c for c in s_clean if c.isdigit()])
+    if not s_digits:
+        return None
+
+    # 1. Exact style match first
+    match = df[df[col_name].astype(str).str.strip().str.upper() == style_clean]
+    if not match.empty:
+        mrp_val = match.iloc[0].get("MRP")
+        if pd.notna(mrp_val):
+            return mrp_val
+
+    # 2. Base style match (e.g. split by /)
+    match = df[df[col_name].astype(str).str.strip().str.upper() == s_clean]
+    if not match.empty:
+        mrp_val = match.iloc[0].get("MRP")
+        if pd.notna(mrp_val):
+            return mrp_val
+
+    # 3. Digit-based lookup fallback (ONLY for B2B Box Stickers!)
+    if tag_type == "B2B Box Sticker tag file":
+        for _, row in df.iterrows():
+            gs_style = str(row.get(col_name, "")).strip().upper()
+            if "/" in gs_style:
+                gs_style = gs_style.split("/")[0].strip()
+            gs_digits = "".join([c for c in gs_style if c.isdigit()])
+            if gs_digits == s_digits:
+                mrp_val = row.get("MRP")
+                if pd.notna(mrp_val):
+                    return mrp_val
+    return None
+
+
+def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
     if not gsheet_dfs:
         return None
 
@@ -1538,41 +1574,17 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs):
     df_dt = gsheet_dfs.get("DT FINAL MRP")
     if df_dt is not None and len(df_dt.columns) > 7:
         col_h = df_dt.columns[7]
-        # Match exact style
-        match = df_dt[df_dt[col_h].astype(str).str.strip().str.upper() == style_clean]
-        if not match.empty:
-            mrp_val = match.iloc[0].get("MRP")
-            if pd.notna(mrp_val):
-                return mrp_val
-
-        # Fallback: base style match (W209/01 -> W209)
-        if "/" in style_clean:
-            base_style = style_clean.split("/")[0]
-            match = df_dt[df_dt[col_h].astype(str).str.strip().str.upper() == base_style]
-            if not match.empty:
-                mrp_val = match.iloc[0].get("MRP")
-                if pd.notna(mrp_val):
-                    return mrp_val
+        mrp_val = find_mrp_by_style_digits(style_clean, df_dt, col_h, tag_type)
+        if mrp_val is not None:
+            return mrp_val
 
     # 2. Search in New MRP 26-27 (matching against Column I (9th column, index 8))
     df_new = gsheet_dfs.get("New MRP 26-27")
     if df_new is not None and len(df_new.columns) > 8:
         col_i = df_new.columns[8]
-        # Match exact style
-        match = df_new[df_new[col_i].astype(str).str.strip().str.upper() == style_clean]
-        if not match.empty:
-            mrp_val = match.iloc[0].get("MRP")
-            if pd.notna(mrp_val):
-                return mrp_val
-
-        # Fallback: base style match (W209/01 -> W209)
-        if "/" in style_clean:
-            base_style = style_clean.split("/")[0]
-            match = df_new[df_new[col_i].astype(str).str.strip().str.upper() == base_style]
-            if not match.empty:
-                mrp_val = match.iloc[0].get("MRP")
-                if pd.notna(mrp_val):
-                    return mrp_val
+        mrp_val = find_mrp_by_style_digits(style_clean, df_new, col_i, tag_type)
+        if mrp_val is not None:
+            return mrp_val
 
     return None
 
@@ -1742,14 +1754,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else None)
             elif field_name == "MRP":
-                excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs)
+                excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                 if excel_val is None:
                     excel_val = excel_row.get(excel_col) if excel_col else None
             elif field_name == "Total MRP":
                 pdf_val = tag.get("Total MRP")
                 if pdf_val is None:
                     continue
-                single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs)
+                single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                 if single_mrp is None and mrp_col:
                     single_mrp = excel_row.get(mrp_col)
                 p_qty = norm_fn(tag.get("Net Quantity") or tag.get("Qty")) or pack_qty_info or 1
@@ -1892,7 +1904,8 @@ def main():
     print(f"Extracted {len(pdf_df)} tags from PDF.")
     print(f"Extracted {len(excel_df)} rows from Excel.")
 
-    report_df = compare(pdf_df, excel_df, gsheet_dfs)
+    tag_type = "B2B Box Sticker tag file" if "b2b" in os.path.basename(pdf_path).lower() or "box" in os.path.basename(pdf_path).lower() else "D2C Dress tag file"
+    report_df = compare(pdf_df, excel_df, gsheet_dfs, tag_type=tag_type)
 
     n_mismatch = (report_df["Status"] != "✅ Match").sum()
     n_total = len(report_df)
