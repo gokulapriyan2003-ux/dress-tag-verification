@@ -188,18 +188,18 @@ if st.button("Run Verification", type="primary"):
                         excel_df.to_excel(writer, sheet_name="Excel_Master", index=False)
                         report_df.to_excel(writer, sheet_name="Comparison_Report", index=False)
 
-                    # Color the report sheet
-                    wb = openpyxl.load_workbook(out_path)
-                    ws = wb["Comparison_Report"]
-                    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-                    status_col_idx = report_df.columns.get_loc("Status") + 1
-                    for row_idx in range(2, ws.max_row + 1):
-                        cell = ws.cell(row=row_idx, column=status_col_idx)
-                        fill = green_fill if "Match" in str(cell.value) and "Mis" not in str(cell.value) and "Not found" not in str(cell.value) else red_fill
-                        for col_idx in range(1, ws.max_column + 1):
-                            ws.cell(row=row_idx, column=col_idx).fill = fill
-                    wb.save(out_path)
+                        # Color the report sheet directly in-memory to prevent BadZipFile errors
+                        workbook = writer.book
+                        worksheet = writer.sheets["Comparison_Report"]
+                        green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                        red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                        
+                        status_col_idx = report_df.columns.get_loc("Status") + 1
+                        for row_idx in range(2, len(report_df) + 2):
+                            status_val = str(report_df.iloc[row_idx - 2].get("Status", ""))
+                            fill = green_fill if "Match" in status_val and "Mis" not in status_val and "Not found" not in status_val else red_fill
+                            for col_idx in range(1, len(report_df.columns) + 1):
+                                worksheet.cell(row=row_idx, column=col_idx).fill = fill
                 except PermissionError:
                     st.error(f"Permission denied when writing to '{out_path}'. Please make sure it is closed in Microsoft Excel and try again.")
                 
