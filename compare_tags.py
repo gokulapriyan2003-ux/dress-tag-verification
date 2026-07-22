@@ -1477,13 +1477,15 @@ def normalize_number(x):
     if x is None or x == "":
         return None
     s = str(x).replace(",", "").replace("₹", "").strip()
+    if "pair" in s.lower():
+        return 1.0
     m = re.search(r"[\d,]+\.?\d*", s)
     if m:
         try:
             return round(float(m.group().replace(",", "")), 2)
         except ValueError:
             pass
-    return str(x).strip().upper()
+    return None
 
 
 def find_col(df, *candidates):
@@ -1830,7 +1832,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_val = lot_info if lot_info else (excel_row.get(excel_col) if excel_col else None)
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
-                excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else None)
+                excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
             elif field_name == "MRP":
                 excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                 if excel_val is None:
