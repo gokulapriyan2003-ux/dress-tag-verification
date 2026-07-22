@@ -60,6 +60,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     barcodes = []
     cm_sizes = []
     descriptions = []
+    total_mrps = []
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -88,6 +89,20 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                     field_lists[matched_label].extend(
                         split_repeated_label(line, matched_label)
                     )
+                    continue
+
+                # Check for Total MRP line
+                tot_tokens = line.split()
+                tot_mrps_line = []
+                for t in tot_tokens:
+                    m_tot = re.search(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*\d+\s*Nos?\s*\)", t, re.IGNORECASE)
+                    if m_tot:
+                        try:
+                            tot_mrps_line.append(float(m_tot.group(1).replace(",", "")))
+                        except ValueError:
+                            pass
+                if tot_mrps_line:
+                    total_mrps.extend(tot_mrps_line)
                     continue
 
                 # barcode / cm-size lines contain several space-separated tokens
@@ -149,6 +164,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             "Size(CM)": cm_sizes[i] if i < len(cm_sizes) else None,
             "Barcode": barcodes[i] if i < len(barcodes) else None,
             "MRP": mrp_val,
+            "Total MRP": total_mrps[i] if i < len(total_mrps) else None,
             "Qty": qty_val,
         })
 
