@@ -1461,15 +1461,35 @@ def normalize_color(x):
     if not x:
         return ""
     c = str(x).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
+    
+    if c.startswith("LT "):
+        c = "LIGHT " + c[3:]
+    c = c.replace(" LT ", " LIGHT ")
+    
+    if c.startswith("DK "):
+        c = "DARK " + c[3:]
+    c = c.replace(" DK ", " DARK ")
+
     descriptors = [" PRO", " NEO", " PLUS", " PREMIUM", " LITE", " MAX", " ULTRA", " SPORT", " ACTIVE", " EDITION", " SERIES", " FIT", " CLASSIC", " FLEX", " PRIME", " STUDIO", " COLLECTION", " LINE", " AIR", " TECH", " DRY"]
     for suffix in descriptors:
         if c.endswith(suffix):
             c = c[:-len(suffix)].strip()
+            
     res = color_map.get(c, c)
     res_str = str(res).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
+    
+    if res_str.startswith("LT "):
+        res_str = "LIGHT " + res_str[3:]
+    res_str = res_str.replace(" LT ", " LIGHT ")
+    
+    if res_str.startswith("DK "):
+        res_str = "DARK " + res_str[3:]
+    res_str = res_str.replace(" DK ", " DARK ")
+
     for var_suffix in [" A", " B", " C", " D"]:
         if res_str.endswith(var_suffix):
             res_str = res_str[:-len(var_suffix)].strip()
+            
     return res_str
 
 
