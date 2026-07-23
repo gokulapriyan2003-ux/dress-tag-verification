@@ -1774,6 +1774,84 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment /
     return None
 
 
+def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+
+    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
+    sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
+
+    if not style_clean and sku_clean:
+        extracted_style, _, _ = extract_sku_details(sku_clean)
+        style_clean = extracted_style if extracted_style else ""
+
+    style_clean = append_sku_batch_to_style(style_clean, sku_clean)
+    style_clean = clean_style_for_gsheet(style_clean)
+    sku_gender = detect_gender_from_sku(sku_clean)
+
+    def find_lot_in_df(df, col_name):
+        gender_col = None
+        for c in df.columns:
+            if str(c).upper().strip() in ["GENDER", "590"]:
+                gender_col = c
+                break
+
+        match = df[df[col_name].astype(str).str.strip().str.upper() == style_clean]
+        for _, row in match.iterrows():
+            if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                val = row.get(col_name)
+                if pd.notna(val) and str(val).strip():
+                    return str(val).strip()
+
+        s_clean = style_clean.split("/")[0].strip() if "/" in style_clean else style_clean
+        match_base = df[df[col_name].astype(str).str.strip().str.upper() == s_clean]
+        for _, row in match_base.iterrows():
+            if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                val = row.get(col_name)
+                if pd.notna(val) and str(val).strip():
+                    return str(val).strip()
+
+        for _, row in df.iterrows():
+            gs_style = str(row.get(col_name, "")).strip().upper()
+            if gs_style and gs_style != "NAN":
+                if match_style_and_batch(style_clean, gs_style, tag_type):
+                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                        val = row.get(col_name)
+                        if pd.notna(val) and str(val).strip():
+                            return str(val).strip()
+                            
+        style_col = "STYLE NO"
+        if style_col in df.columns:
+            for _, row in df.iterrows():
+                gs_s = str(row.get(style_col, "")).strip().upper()
+                if gs_s and gs_s != "NAN":
+                    if match_style_and_batch(style_clean, gs_s, tag_type):
+                        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                            combined = row.get(col_name)
+                            if pd.notna(combined) and str(combined).strip():
+                                return str(combined).strip()
+                            batch = row.get("BATCH")
+                            b_suffix = f"/{batch}" if pd.notna(batch) and str(batch).strip() and str(batch).strip().upper() != "NAN" else ""
+                            return f"{gs_s}{b_suffix}"
+        return None
+
+    df_dt = gsheet_dfs.get("DT FINAL MRP")
+    if df_dt is not None and len(df_dt.columns) > 7:
+        col_h = df_dt.columns[7]
+        lot_val = find_lot_in_df(df_dt, col_h)
+        if lot_val:
+            return lot_val
+
+    df_new = gsheet_dfs.get("New MRP 26-27")
+    if df_new is not None and len(df_new.columns) > 8:
+        col_i = df_new.columns[8]
+        lot_val = find_lot_in_df(df_new, col_i)
+        if lot_val:
+            return lot_val
+
+    return None
+
+
 def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
     if not gsheet_dfs:
         return None
@@ -1960,7 +2038,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     if tag_type == "B2B Box Sticker tag file":
         field_map = [
             ("Description", desc_col, normalize_text),
-            ("Lot No", lot_col, normalize_text),
+            ("Lot No (Google Sheet)", None, normalize_text),
+            ("Lot No (GS1 Master)", lot_col, normalize_text),
             ("Qty", qty_col, normalize_number),
             ("Total MRP (Google Sheet)", None, normalize_number),
             ("Total MRP (GS1 Master)", total_mrp_col, normalize_number),
@@ -1971,7 +2050,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     else:
         field_map = [
             ("Description", desc_col, normalize_text),
-            ("Lot No", lot_col, normalize_text),
+            ("Lot No (Google Sheet)", None, normalize_text),
+            ("Lot No (GS1 Master)", lot_col, normalize_text),
             ("Qty", qty_col, normalize_number),
             ("MRP (Google Sheet)", None, normalize_number),
             ("MRP (GS1 Master)", mrp_col, normalize_number),
@@ -2017,7 +2097,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if not pdf_val:
                     pdf_val = desc_info
                 excel_val = desc_info if desc_info else (excel_row.get(excel_col) if excel_col else None)
-            elif field_name == "Lot No":
+            elif field_name == "Lot No (Google Sheet)":
+                pdf_val = tag.get("Lot No") or tag.get("Style")
+                excel_val = get_updated_lot_no(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+            elif field_name == "Lot No (GS1 Master)":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
                 excel_val = lot_info if lot_info else (excel_row.get(excel_col) if excel_col else None)
             elif field_name == "Qty":
