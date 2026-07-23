@@ -1528,7 +1528,18 @@ def normalize_color(x):
     c = c.replace(" DK ", " DARK ")
 
     descriptors = {"PRO", "NEO", "PLUS", "PREMIUM", "LITE", "MAX", "ULTRA", "SPORT", "ACTIVE", "EDITION", "SERIES", "FIT", "CLASSIC", "FLEX", "PRIME", "STUDIO", "COLLECTION", "LINE", "AIR", "TECH", "DRY"}
-    words = [w for w in c.split() if w not in descriptors]
+    
+    abbrevs = {
+        "LT": "LIGHT",
+        "DK": "DARK",
+        "BB": "BLUE BERRY"
+    }
+    
+    words = []
+    for w in c.split():
+        if w in descriptors:
+            continue
+        words.append(abbrevs.get(w, w))
     c = " ".join(words)
             
     res = color_map.get(c, c)
@@ -1542,8 +1553,11 @@ def normalize_color(x):
         res_str = "DARK " + res_str[3:]
     res_str = res_str.replace(" DK ", " DARK ")
 
-    # Filter out descriptors from mapped output as well to be fully robust
-    res_words = [w for w in res_str.split() if w not in descriptors]
+    res_words = []
+    for w in res_str.split():
+        if w in descriptors:
+            continue
+        res_words.append(abbrevs.get(w, w))
     res_str = " ".join(res_words)
 
     for var_suffix in [" A", " B", " C", " D"]:
@@ -1852,78 +1866,14 @@ def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
     if not gsheet_dfs:
         return None
 
-    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
-    sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
-
-    if not style_clean and sku_clean:
-        extracted_style, _, _ = extract_sku_details(sku_clean)
-        style_clean = extracted_style if extracted_style else ""
-
-    style_clean = append_sku_batch_to_style(style_clean, sku_clean)
-    style_clean = clean_style_for_gsheet(style_clean)
-
-    # 1. Search in DT FINAL MRP
-    df_dt = gsheet_dfs.get("DT FINAL MRP")
-    if df_dt is not None and len(df_dt.columns) > 7:
-        col_h = df_dt.columns[7]
-        s_clean = style_clean.split("/")[0].strip() if "/" in style_clean else style_clean
-        s_digits = "".join([c for c in s_clean if c.isdigit()])
-        
-        # Exact/Base Match first
-        match = df_dt[df_dt[col_h].astype(str).str.strip().str.upper() == style_clean]
-        if not match.empty:
-            desc = match.iloc[0].get("DESCRIPTION")
-            if pd.notna(desc):
-                return str(desc).strip()
-        match = df_dt[df_dt[col_h].astype(str).str.strip().str.upper() == s_clean]
-        if not match.empty:
-            desc = match.iloc[0].get("DESCRIPTION")
-            if pd.notna(desc):
-                return str(desc).strip()
-                
-        # Digit match (B2B only)
-        if tag_type == "B2B Box Sticker tag file" and s_digits:
-            for _, row in df_dt.iterrows():
-                gs_style = str(row.get(col_h, "")).strip().upper()
-                if "/" in gs_style:
-                    gs_style = gs_style.split("/")[0].strip()
-                gs_digits = "".join([c for c in gs_style if c.isdigit()])
-                if gs_digits == s_digits:
-                    desc = row.get("DESCRIPTION")
-                    if pd.notna(desc):
-                        return str(desc).strip()
-
-    # 2. Search in New MRP 26-27
-    df_new = gsheet_dfs.get("New MRP 26-27")
-    if df_new is not None and len(df_new.columns) > 8:
-        col_i = df_new.columns[8]
-        s_clean = style_clean.split("/")[0].strip() if "/" in style_clean else style_clean
-        s_digits = "".join([c for c in s_clean if c.isdigit()])
-        
-        # Exact/Base Match first
-        match = df_new[df_new[col_i].astype(str).str.strip().str.upper() == style_clean]
-        if not match.empty:
-            desc = match.iloc[0].get("DESCRIPTION")
-            if pd.notna(desc):
-                return str(desc).strip()
-        match = df_new[df_new[col_i].astype(str).str.strip().str.upper() == s_clean]
-        if not match.empty:
-            desc = match.iloc[0].get("DESCRIPTION")
-            if pd.notna(desc):
-                return str(desc).strip()
-                
-        # Digit match (B2B only)
-        if tag_type == "B2B Box Sticker tag file" and s_digits:
-            for _, row in df_new.iterrows():
-                gs_style = str(row.get(col_i, "")).strip().upper()
-                if "/" in gs_style:
-                    gs_style = gs_style.split("/")[0].strip()
-                gs_digits = "".join([c for c in gs_style if c.isdigit()])
-                if gs_digits == s_digits:
-                    desc = row.get("DESCRIPTION")
-                    if pd.notna(desc):
-                        return str(desc).strip()
-
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                desc = row.get("DESCRIPTION")
+                if pd.notna(desc):
+                    return str(desc).strip()
     return None
 
 
