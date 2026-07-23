@@ -1574,32 +1574,15 @@ def gender_matches(row_gender, sku_gender):
     return sg in rg
 
 
-def clean_prefix(prefix):
-    p = str(prefix).strip().upper()
-    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G"}
-    if p and p[0] in category_letters:
-        p = p[1:]
-    return p
-
-
-def match_style_and_batch(pdf_lot, gs_val, tag_type="Standard Garment / Dress Tags"):
-    p_lot = str(pdf_lot).strip().upper()
-    g_val = str(gs_val).strip().upper()
+def match_style_code(pdf_style_base, gs_style_base, tag_type="Standard Garment / Dress Tags"):
+    p_s = str(pdf_style_base).strip().upper()
+    g_s = str(gs_style_base).strip().upper()
     
-    if p_lot == g_val:
+    if p_s == g_s:
         return True
         
-    p_parts = p_lot.split("/")
-    g_parts = g_val.split("/")
-    
-    p_style = p_parts[0]
-    p_batch = p_parts[1].strip() if len(p_parts) > 1 else ""
-    
-    g_style = g_parts[0]
-    g_batch = g_parts[1].strip() if len(g_parts) > 1 else ""
-    
-    p_prefix = "".join([c for c in p_style if c.isalpha()])
-    g_prefix = "".join([c for c in g_style if c.isalpha()])
+    p_prefix = "".join([c for c in p_s if c.isalpha()])
+    g_prefix = "".join([c for c in g_s if c.isalpha()])
     
     p_clean = clean_prefix(p_prefix)
     g_clean = clean_prefix(g_prefix)
@@ -1611,92 +1594,40 @@ def match_style_and_batch(pdf_lot, gs_val, tag_type="Standard Garment / Dress Ta
             if not ((p_prefix == "S" and g_prefix == "WS") or (p_prefix == "WS" and g_prefix == "S")):
                 return False
                 
-    p_style_digits = "".join([c for c in p_style if c.isdigit()])
-    g_style_digits = "".join([c for c in g_style if c.isdigit()])
+    p_digits = "".join([c for c in p_s if c.isdigit()])
+    g_digits = "".join([c for c in g_s if c.isdigit()])
     
-    if p_style_digits != g_style_digits:
-        return False
+    return p_digits == g_digits
+
+
+def match_batch_code(pdf_batch, gs_batch):
+    p_b = str(pdf_batch).strip().upper()
+    g_b = str(gs_batch).strip().upper()
+    if g_b == "NAN" or g_b == "0" or not g_b:
+        g_b = ""
         
-    if p_batch and g_batch:
-        p_batch_digits = "".join([c for c in p_batch if c.isdigit()])
-        g_batch_digits = "".join([c for c in g_batch if c.isdigit()])
-        if p_batch_digits and g_batch_digits:
-            try:
-                if int(p_batch_digits) == int(g_batch_digits):
-                    return True
-            except ValueError:
-                pass
-        if p_batch in g_batch or g_batch in p_batch:
+    if p_b == g_b:
+        return True
+        
+    p_digits = "".join([c for c in p_b if c.isdigit()])
+    g_digits = "".join([c for c in g_b if c.isdigit()])
+    
+    if p_digits and g_digits:
+        try:
+            if int(p_digits) == int(g_digits):
+                p_alpha = "".join([c for c in p_b if c.isalpha()])
+                g_alpha = "".join([c for c in g_b if c.isalpha()])
+                if p_alpha and p_alpha != g_alpha:
+                    return False
+                return True
+        except ValueError:
+            pass
+            
+    if p_b and g_b and not p_digits and not g_digits:
+        if p_b in g_b or g_b in p_b:
             return True
-        return False
-        
-    return True
-
-
-def find_mrp_by_style_digits(style_clean, df, col_name, tag_type="Standard Garment / Dress Tags", sku_gender=None):
-    s_clean = str(style_clean).strip().upper()
-    if "/" in s_clean:
-        s_clean = s_clean.split("/")[0].strip()
-    s_digits = "".join([c for c in s_clean if c.isdigit()])
-    if not s_digits:
-        return None
-
-    # Gender column detection
-    gender_col = None
-    for c in df.columns:
-        if str(c).upper().strip() in ["GENDER", "590"]:
-            gender_col = c
-            break
-
-    # 1. Exact style match first (with gender check)
-    match = df[df[col_name].astype(str).str.strip().str.upper() == style_clean]
-    for _, row in match.iterrows():
-        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-            mrp_val = row.get("MRP")
-            if pd.notna(mrp_val):
-                return mrp_val
-
-    # 2. Base style match (with gender check)
-    match_base = df[df[col_name].astype(str).str.strip().str.upper() == s_clean]
-    for _, row in match_base.iterrows():
-        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-            mrp_val = row.get("MRP")
-            if pd.notna(mrp_val):
-                return mrp_val
-
-    # 3. Style + Batch match fallback (with gender check)
-    for _, row in df.iterrows():
-        gs_style = str(row.get(col_name, "")).strip().upper()
-        if gs_style and gs_style != "NAN":
-            if match_style_and_batch(style_clean, gs_style, tag_type):
-                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                    mrp_val = row.get("MRP")
-                    if pd.notna(mrp_val):
-                        return mrp_val
-                    
-    # Check STYLE NO column direct fallback (with gender check)
-    style_col = "STYLE NO"
-    if style_col in df.columns:
-        for _, row in df.iterrows():
-            gs_s = str(row.get(style_col, "")).strip().upper()
-            if gs_s and gs_s != "NAN":
-                if match_style_and_batch(style_clean, gs_s, tag_type):
-                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                        mrp_val = row.get("MRP")
-                        if pd.notna(mrp_val):
-                            return mrp_val
-
-    # 4. Strict fallbacks without gender check (to ensure we return a value if no gender row exists)
-    for _, row in match.iterrows():
-        mrp_val = row.get("MRP")
-        if pd.notna(mrp_val):
-            return mrp_val
-    for _, row in match_base.iterrows():
-        mrp_val = row.get("MRP")
-        if pd.notna(mrp_val):
-            return mrp_val
-                        
-    return None
+            
+    return False
 
 
 def append_sku_batch_to_style(pdf_style, pdf_sku):
@@ -1740,37 +1671,97 @@ def append_sku_batch_to_style(pdf_style, pdf_sku):
     return style_clean
 
 
+def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garment / Dress Tags"):
+    style_clean = str(pdf_style).strip().upper()
+    
+    # Extract parts
+    p_parts = style_clean.split("/")
+    p_style_base = p_parts[0].strip()
+    p_batch = p_parts[1].strip() if len(p_parts) > 1 else ""
+    
+    # Check if SKU has suffix
+    if not p_batch and pdf_sku:
+        sku_clean = str(pdf_sku).strip().upper()
+        n = len(sku_clean)
+        rules = {
+            11: (2, 4, 0),
+            12: (2, 4, 0),
+            13: (2, 5, 0),
+            14: (2, 4, 2),
+            15: (2, 4, 3),
+            16: (2, 5, 3),
+            17: (2, 8, 0),
+            18: (3, 6, 3),
+        }
+        if n in rules:
+            _, _, end_remove = rules[n]
+            if end_remove > 0:
+                suffix = sku_clean[-end_remove:]
+                has_alpha = any(c.isalpha() for c in suffix)
+                if has_alpha:
+                    import re
+                    match = re.match(r"^([A-Z]+)(0*)([0-9]+)$", suffix)
+                    if match:
+                        p_batch = match.group(1) + match.group(3)
+                    else:
+                        p_batch = suffix
+                else:
+                    suffix_digits = "".join([c for c in suffix if c.isdigit()])
+                    if suffix_digits:
+                        p_batch = str(int(suffix_digits))
+                        
+    sku_gender = detect_gender_from_sku(pdf_sku)
+    
+    gender_col = None
+    for c in df.columns:
+        if str(c).upper().strip() in ["GENDER", "590"]:
+            gender_col = c
+            break
+
+    # First attempt: match with gender and exact prefix matching
+    for _, row in df.iterrows():
+        gs_style = str(row.get("STYLE NO", "")).strip().upper()
+        gs_batch = str(row.get("BATCH", "")).strip().upper()
+        if gs_style and gs_style != "NAN":
+            if match_style_code(p_style_base, gs_style, tag_type):
+                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                    if match_batch_code(p_batch, gs_batch):
+                        return row
+                        
+    # Fallback to match style and empty batch
+    if not p_batch:
+        for _, row in df.iterrows():
+            gs_style = str(row.get("STYLE NO", "")).strip().upper()
+            gs_batch = str(row.get("BATCH", "")).strip().upper()
+            if gs_style and gs_style != "NAN":
+                if match_style_code(p_style_base, gs_style, tag_type):
+                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                        if not gs_batch or gs_batch == "NAN" or gs_batch == "0":
+                            return row
+                            
+    return None
+
+
+def clean_prefix(prefix):
+    p = str(prefix).strip().upper()
+    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G"}
+    if p and p[0] in category_letters:
+        p = p[1:]
+    return p
+
+
 def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
     if not gsheet_dfs:
         return None
 
-    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
-    sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
-
-    if not style_clean and sku_clean:
-        extracted_style, _, _ = extract_sku_details(sku_clean)
-        style_clean = extracted_style if extracted_style else ""
-
-    style_clean = append_sku_batch_to_style(style_clean, sku_clean)
-    style_clean = clean_style_for_gsheet(style_clean)
-    sku_gender = detect_gender_from_sku(sku_clean)
-
-    # 1. Search in DT FINAL MRP
-    df_dt = gsheet_dfs.get("DT FINAL MRP")
-    if df_dt is not None and len(df_dt.columns) > 7:
-        col_h = df_dt.columns[7]
-        mrp_val = find_mrp_by_style_digits(style_clean, df_dt, col_h, tag_type, sku_gender)
-        if mrp_val is not None:
-            return mrp_val
-
-    # 2. Search in New MRP 26-27
-    df_new = gsheet_dfs.get("New MRP 26-27")
-    if df_new is not None and len(df_new.columns) > 8:
-        col_i = df_new.columns[8]
-        mrp_val = find_mrp_by_style_digits(style_clean, df_new, col_i, tag_type, sku_gender)
-        if mrp_val is not None:
-            return mrp_val
-
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                mrp_val = row.get("MRP")
+                if pd.notna(mrp_val):
+                    return mrp_val
     return None
 
 
@@ -1778,76 +1769,25 @@ def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garmen
     if not gsheet_dfs:
         return None
 
-    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
-    sku_clean = str(pdf_sku).strip().upper() if pdf_sku else ""
-
-    if not style_clean and sku_clean:
-        extracted_style, _, _ = extract_sku_details(sku_clean)
-        style_clean = extracted_style if extracted_style else ""
-
-    style_clean = append_sku_batch_to_style(style_clean, sku_clean)
-    style_clean = clean_style_for_gsheet(style_clean)
-    sku_gender = detect_gender_from_sku(sku_clean)
-
-    def find_lot_in_df(df, col_name):
-        gender_col = None
-        for c in df.columns:
-            if str(c).upper().strip() in ["GENDER", "590"]:
-                gender_col = c
-                break
-
-        match = df[df[col_name].astype(str).str.strip().str.upper() == style_clean]
-        for _, row in match.iterrows():
-            if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                val = row.get(col_name)
-                if pd.notna(val) and str(val).strip():
-                    return str(val).strip()
-
-        s_clean = style_clean.split("/")[0].strip() if "/" in style_clean else style_clean
-        match_base = df[df[col_name].astype(str).str.strip().str.upper() == s_clean]
-        for _, row in match_base.iterrows():
-            if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                val = row.get(col_name)
-                if pd.notna(val) and str(val).strip():
-                    return str(val).strip()
-
-        for _, row in df.iterrows():
-            gs_style = str(row.get(col_name, "")).strip().upper()
-            if gs_style and gs_style != "NAN":
-                if match_style_and_batch(style_clean, gs_style, tag_type):
-                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                        val = row.get(col_name)
-                        if pd.notna(val) and str(val).strip():
-                            return str(val).strip()
-                            
-        style_col = "STYLE NO"
-        if style_col in df.columns:
-            for _, row in df.iterrows():
-                gs_s = str(row.get(style_col, "")).strip().upper()
-                if gs_s and gs_s != "NAN":
-                    if match_style_and_batch(style_clean, gs_s, tag_type):
-                        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                            combined = row.get(col_name)
-                            if pd.notna(combined) and str(combined).strip():
-                                return str(combined).strip()
-                            batch = row.get("BATCH")
-                            b_suffix = f"/{batch}" if pd.notna(batch) and str(batch).strip() and str(batch).strip().upper() != "NAN" else ""
-                            return f"{gs_s}{b_suffix}"
-        return None
-
-    df_dt = gsheet_dfs.get("DT FINAL MRP")
-    if df_dt is not None and len(df_dt.columns) > 7:
-        col_h = df_dt.columns[7]
-        lot_val = find_lot_in_df(df_dt, col_h)
-        if lot_val:
-            return lot_val
-
-    df_new = gsheet_dfs.get("New MRP 26-27")
-    if df_new is not None and len(df_new.columns) > 8:
-        col_i = df_new.columns[8]
-        lot_val = find_lot_in_df(df_new, col_i)
-        if lot_val:
-            return lot_val
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                col_name = None
+                for c in df.columns:
+                    if str(c).strip() == ",":
+                        col_name = c
+                        break
+                if col_name:
+                    val = row.get(col_name)
+                    if pd.notna(val) and str(val).strip():
+                        return str(val).strip()
+                
+                gs_s = row.get("STYLE NO")
+                gs_b = row.get("BATCH")
+                b_suffix = f"/{gs_b}" if pd.notna(gs_b) and str(gs_b).strip() and str(gs_b).strip().upper() != "NAN" else ""
+                return f"{gs_s}{b_suffix}"
 
     return None
 
