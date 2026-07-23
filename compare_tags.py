@@ -1720,10 +1720,21 @@ def append_sku_batch_to_style(pdf_style, pdf_sku):
                 _, _, end_remove = rules[n]
                 if end_remove > 0:
                     suffix = sku_clean[-end_remove:]
-                    suffix_digits = "".join([c for c in suffix if c.isdigit()])
-                    if suffix_digits:
-                        batch_val = str(int(suffix_digits))
-                        style_clean = f"{style_clean}/{batch_val}"
+                    has_alpha = any(c.isalpha() for c in suffix)
+                    if has_alpha:
+                        import re
+                        match = re.match(r"^([A-Z]+)(0*)([0-9]+)$", suffix)
+                        if match:
+                            batch_val = match.group(1) + match.group(3)
+                        else:
+                            batch_val = suffix
+                    else:
+                        suffix_digits = "".join([c for c in suffix if c.isdigit()])
+                        if suffix_digits:
+                            batch_val = str(int(suffix_digits))
+                        else:
+                            batch_val = suffix
+                    style_clean = f"{style_clean}/{batch_val}"
         except Exception:
             pass
     return style_clean
