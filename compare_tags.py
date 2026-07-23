@@ -1470,10 +1470,9 @@ def normalize_color(x):
         c = "DARK " + c[3:]
     c = c.replace(" DK ", " DARK ")
 
-    descriptors = [" PRO", " NEO", " PLUS", " PREMIUM", " LITE", " MAX", " ULTRA", " SPORT", " ACTIVE", " EDITION", " SERIES", " FIT", " CLASSIC", " FLEX", " PRIME", " STUDIO", " COLLECTION", " LINE", " AIR", " TECH", " DRY"]
-    for suffix in descriptors:
-        if c.endswith(suffix):
-            c = c[:-len(suffix)].strip()
+    descriptors = {"PRO", "NEO", "PLUS", "PREMIUM", "LITE", "MAX", "ULTRA", "SPORT", "ACTIVE", "EDITION", "SERIES", "FIT", "CLASSIC", "FLEX", "PRIME", "STUDIO", "COLLECTION", "LINE", "AIR", "TECH", "DRY"}
+    words = [w for w in c.split() if w not in descriptors]
+    c = " ".join(words)
             
     res = color_map.get(c, c)
     res_str = str(res).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
@@ -1485,6 +1484,10 @@ def normalize_color(x):
     if res_str.startswith("DK "):
         res_str = "DARK " + res_str[3:]
     res_str = res_str.replace(" DK ", " DARK ")
+
+    # Filter out descriptors from mapped output as well to be fully robust
+    res_words = [w for w in res_str.split() if w not in descriptors]
+    res_str = " ".join(res_words)
 
     for var_suffix in [" A", " B", " C", " D"]:
         if res_str.endswith(var_suffix):
