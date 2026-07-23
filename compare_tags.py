@@ -169,7 +169,9 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     counts = {k: len(v) for k, v in field_lists.items()}
     counts["Barcode"] = len(barcodes)
     counts["CM"] = len(cm_sizes)
-    n_tags = counts.get("SKU Code:")
+    n_tags = counts.get("SKU Code:", 0)
+    if n_tags is None:
+        n_tags = 0
 
     # Sanity check: every field should appear exactly once per tag.
     mismatched = {k: v for k, v in counts.items() if v != n_tags}
@@ -2171,6 +2173,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 "Status": status,
             })
 
+    if not report_rows:
+        return pd.DataFrame(columns=["SKU", "Field", "PDF Value", "Excel Value", "Status"])
     return pd.DataFrame(report_rows)
 
 

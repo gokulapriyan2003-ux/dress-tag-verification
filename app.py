@@ -150,6 +150,10 @@ if st.button("Run Verification", type="primary"):
                 # Perform comparison
                 report_df = compare(pdf_df, excel_df, gsheet_dfs, tag_type=tag_type)
                 
+                if len(pdf_df) == 0:
+                    st.error("❌ No tags were extracted from the uploaded PDF. Please verify that this is a valid tag sheet containing 'SKU Code:' text.")
+                    st.stop()
+                
                 n_mismatch = (report_df["Status"] != "✅ Match").sum()
                 n_total = len(report_df)
                 success_rate = round(((n_total - n_mismatch) / n_total) * 100, 1) if n_total > 0 else 0
