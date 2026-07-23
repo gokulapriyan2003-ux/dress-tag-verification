@@ -61,6 +61,60 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     cm_sizes = []
     descriptions = []
     total_mrps = []
+    sku_to_huge_size = {}
+
+    SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX"}
+    
+    def clean_reverse_size(sz):
+        s = str(sz).strip().upper()
+        if s == "LX": return "XL"
+        if s == "LX2": return "2XL"
+        if s == "LX3": return "3XL"
+        if s == "LX4": return "4XL"
+        if s == "LX5": return "5XL"
+        if s == "SX": return "XS"
+        if s == "LXX": return "XXL"
+        return s
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                words = page.extract_words()
+                skus = []
+                for w in words:
+                    text = w["text"].strip()
+                    if len(text) >= 8 and text.isupper() and any(c.isdigit() for c in text):
+                        skus.append(w)
+                sizes = []
+                for w in words:
+                    text = w["text"].strip().upper()
+                    if text in SIZE_SET:
+                        sizes.append(w)
+                for sku_w in skus:
+                    sku_text = sku_w["text"]
+                    sku_x = sku_w["x0"]
+                    sku_y = sku_w["top"]
+                    
+                    best_size = None
+                    min_dist = float("inf")
+                    for sz_w in sizes:
+                        sz_text = sz_w["text"]
+                        sz_x = sz_w["x0"]
+                        sz_y = sz_w["top"]
+                        
+                        if sz_x < sku_x:
+                            continue
+                        y_diff = abs(sz_y - sku_y)
+                        if y_diff > 120:
+                            continue
+                        dist = ((sz_x - sku_x)**2 + y_diff**2)**0.5
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_size = sz_text
+                    if best_size:
+                        sku_to_huge_size[sku_text] = clean_reverse_size(best_size)
+    except Exception:
+        pass
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -146,9 +200,12 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         desc_val = get("Product:") or (descriptions[i] if i < len(descriptions) else None)
         size_val = get("SIZE :")
         if not size_val and sku_val:
-            _, _, ext_sz = extract_sku_details(sku_val)
-            if ext_sz:
-                size_val = format_size_as_tag(ext_sz)
+            if sku_val in sku_to_huge_size:
+                size_val = sku_to_huge_size[sku_val]
+            else:
+                _, _, ext_sz = extract_sku_details(sku_val)
+                if ext_sz:
+                    size_val = format_size_as_tag(ext_sz)
 
         rows.append({
             "Style": style_raw,
