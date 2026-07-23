@@ -2127,7 +2127,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                             excel_val = g_desc
                             excel_norm = g_norm
                 status = "✅ Match" if is_match else "❌ Mismatch"
-            elif field_name == "Lot No":
+            elif field_name.startswith("Lot No"):
                 def get_normalized_lot_parts(lot_str):
                     parts = str(lot_str).strip().upper().split("/")
                     base = parts[0].strip()
