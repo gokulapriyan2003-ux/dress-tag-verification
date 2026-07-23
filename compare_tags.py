@@ -2105,9 +2105,26 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                             excel_norm = g_norm
                 status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "Lot No":
-                p_b = str(pdf_norm).split("/")[0] if "/" in str(pdf_norm) else str(pdf_norm)
-                e_b = str(excel_norm).split("/")[0] if "/" in str(excel_norm) else str(excel_norm)
-                is_match = (pdf_norm == excel_norm or p_b == e_b)
+                def get_normalized_lot_parts(lot_str):
+                    parts = str(lot_str).strip().upper().split("/")
+                    base = parts[0].strip()
+                    batch = parts[1].strip() if len(parts) > 1 else ""
+                    batch_digits = "".join([c for c in batch if c.isdigit()])
+                    if batch_digits:
+                        try:
+                            import re
+                            match = re.match(r"^([A-Z]+)(0*)([0-9]+)$", batch)
+                            if match:
+                                batch = match.group(1) + match.group(3)
+                            else:
+                                batch = str(int(batch_digits))
+                        except Exception:
+                            pass
+                    return base, batch
+
+                p_base, p_batch = get_normalized_lot_parts(pdf_norm)
+                e_base, e_batch = get_normalized_lot_parts(excel_norm)
+                is_match = (p_base == e_base and p_batch == e_batch)
                 status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "Color":
                 is_match = (
