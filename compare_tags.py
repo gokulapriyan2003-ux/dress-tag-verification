@@ -1729,15 +1729,14 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
                         return row
                         
     # Fallback to match style and empty batch
-    if not p_batch:
-        for _, row in df.iterrows():
-            gs_style = str(row.get("STYLE NO", "")).strip().upper()
-            gs_batch = str(row.get("BATCH", "")).strip().upper()
-            if gs_style and gs_style != "NAN":
-                if match_style_code(p_style_base, gs_style, tag_type):
-                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                        if not gs_batch or gs_batch == "NAN" or gs_batch == "0":
-                            return row
+    for _, row in df.iterrows():
+        gs_style = str(row.get("STYLE NO", "")).strip().upper()
+        gs_batch = str(row.get("BATCH", "")).strip().upper()
+        if gs_style and gs_style != "NAN":
+            if match_style_code(p_style_base, gs_style, tag_type):
+                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                    if not gs_batch or gs_batch == "NAN" or gs_batch == "0":
+                        return row
                             
     return None
 
