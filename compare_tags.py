@@ -1990,13 +1990,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     else:
         field_map = [
             ("Description", desc_col, normalize_text),
-            ("Lot No (Google Sheet)", None, normalize_text),
-            ("Lot No (GS1 Master)", lot_col, normalize_text),
-            ("Qty", qty_col, normalize_number),
             ("MRP (Google Sheet)", None, normalize_number),
             ("MRP (GS1 Master)", mrp_col, normalize_number),
-            ("Total MRP (Google Sheet)", None, normalize_number),
-            ("Total MRP (GS1 Master)", total_mrp_col, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
