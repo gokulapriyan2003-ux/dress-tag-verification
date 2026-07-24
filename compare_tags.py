@@ -26,44 +26,54 @@ import urllib.request
 # Each of these labels appears once per tag, repeated N times per printed line
 # (N = number of tags side-by-side in that row of the sheet). We split each
 # line on the label text itself to recover the N individual values in order.
-LABELS = [
-    "Style:",
-    "Lot No:",
-    "Product:",
-    "Fit:",
-    "Color:",
-    "Category:",
-    "Manufactured On:",
-    "MFD :",
-    "Net Quantity:",
-    "Net Qty:",
-    "HSN Code:",
-    "SKU Code:",
-    "SIZE :",
-    "MRP:",
-    "Qty:",
-]
+CANONICAL_LABELS = {
+    "Style:": ["Style:", "STYLE:", "Lot No:", "LOT NO:", "STYLE CODE:", "Style Code:"],
+    "Product:": ["Product:", "PRODUCT:", "Product Name:", "PRODUCT NAME:"],
+    "Fit:": ["Fit:", "FIT:"],
+    "Color:": ["Color:", "COLOR:", "Colour:", "COLOUR:"],
+    "Category:": ["Category:", "CATEGORY:"],
+    "Manufactured On:": ["Manufactured On:", "MANUFACTURED ON:", "MFD :", "MFD:", "MFD ON:", "MFD ON :"],
+    "Net Quantity:": ["Net Quantity:", "NET QUANTITY:", "Net Qty:", "NET QTY:"],
+    "HSN Code:": ["HSN Code:", "HSN CODE:"],
+    "SKU Code:": ["SKU Code:", "SKU CODE:", "SKU:"],
+    "SIZE :": ["SIZE :", "SIZE:", "Size:", "Size :"],
+    "MRP:": ["MRP:", "MRP :"],
+    "Qty:": ["Qty:", "QTY:", "Qty :", "QTY :"],
+}
+
+LABELS = []
+LABEL_TO_CANONICAL = {}
+for canonical, variations in CANONICAL_LABELS.items():
+    for var in variations:
+        LABELS.append(var)
+        LABEL_TO_CANONICAL[var] = canonical
 
 BARCODE_RE = re.compile(r"^\d{8,14}$")          # standalone barcode line
 CM_RE = re.compile(r"^\(\d+(\.\d+)?CM\)$")       # e.g. (71.12CM)
 
 
 def split_repeated_label(line: str, label: str):
-    """Split a line like 'Label: A Label: B Label: C' into ['A','B','C']."""
     parts = line.split(label)
     parts = [p.strip() for p in parts if p.strip() != ""]
     return parts
 
 
+def split_repeated_label_case_insensitive(line: str, label: str):
+    pattern = re.compile(re.escape(label), re.IGNORECASE)
+    parts = pattern.split(line)
+    parts = [p.strip() for p in parts if p.strip()]
+    return parts
+
+
 def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
-    field_lists = {lbl: [] for lbl in LABELS}
+    field_lists = {lbl: [] for lbl in CANONICAL_LABELS.keys()}
     barcodes = []
     cm_sizes = []
     descriptions = []
     total_mrps = []
     sku_to_huge_size = {}
 
-    SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX"}
+    SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX", "06UK", "07UK", "08UK", "09UK", "10UK", "11UK", "12UK", "6UK", "7UK", "8UK", "9UK"}
     
     def clean_reverse_size(sz):
         s = str(sz).strip().upper()
@@ -121,28 +131,44 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             text = page.extract_text() or ""
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
             for idx_line, line in enumerate(raw_lines):
-                matched_label = None
+                matches = []
                 for lbl in LABELS:
-                    if line.startswith(lbl):
-                        matched_label = lbl
-                        break
+                    pattern = re.compile(re.escape(lbl), re.IGNORECASE)
+                    for m in pattern.finditer(line):
+                        matches.append((m.start(), m.end(), lbl))
+                
+                matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+                filtered_matches = []
+                last_end = -1
+                for start, end, lbl in matches:
+                    if start >= last_end:
+                        filtered_matches.append((start, end, lbl))
+                        last_end = end
+                
+                if filtered_matches:
+                    for i, (start, end, lbl) in enumerate(filtered_matches):
+                        canonical = LABEL_TO_CANONICAL[lbl]
+                        val_start = end
+                        val_end = filtered_matches[i+1][0] if i+1 < len(filtered_matches) else len(line)
+                        val_str = line[val_start:val_end].strip()
+                        
+                        if canonical == "Lot No:" and idx_line > 0:
+                            prev_line = raw_lines[idx_line - 1]
+                            lots_count = len(val_str.split("  "))
+                            if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
+                                parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
+                                if len(parts) == lots_count:
+                                    descriptions.extend(parts)
+                                else:
+                                    chunk_len = max(1, len(prev_line) // lots_count)
+                                    single_desc = prev_line[:chunk_len].strip()
+                                    descriptions.extend([single_desc] * lots_count)
 
-                if matched_label:
-                    if matched_label == "Lot No:" and idx_line > 0:
-                        prev_line = raw_lines[idx_line - 1]
-                        lots_count = len(split_repeated_label(line, "Lot No:"))
-                        if "Lot No:" not in prev_line and not any(prev_line.startswith(x) for x in LABELS):
-                            parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
-                            if len(parts) == lots_count:
-                                descriptions.extend(parts)
-                            else:
-                                chunk_len = max(1, len(prev_line) // lots_count)
-                                single_desc = prev_line[:chunk_len].strip()
-                                descriptions.extend([single_desc] * lots_count)
-
-                    field_lists[matched_label].extend(
-                        split_repeated_label(line, matched_label)
-                    )
+                        if canonical not in ["Product:", "Description"]:
+                            parts = [p.strip() for p in val_str.split("  ") if p.strip()]
+                            field_lists[canonical].extend(parts)
+                        else:
+                            field_lists[canonical].append(val_str)
                     continue
 
                 # Check for Total MRP line
@@ -161,10 +187,13 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
 
                 # barcode / cm-size lines contain several space-separated tokens
                 tokens = line.split()
-                if all(BARCODE_RE.match(t) for t in tokens) and tokens:
-                    barcodes.extend(tokens)
-                elif all(CM_RE.match(t) for t in tokens) and tokens:
-                    cm_sizes.extend(tokens)
+                found_barcodes = [t for t in tokens if BARCODE_RE.match(t)]
+                if found_barcodes:
+                    barcodes.extend(found_barcodes)
+                    
+                found_cm = [t for t in tokens if CM_RE.match(t)]
+                if found_cm:
+                    cm_sizes.extend(found_cm)
 
     counts = {k: len(v) for k, v in field_lists.items()}
     counts["Barcode"] = len(barcodes)
