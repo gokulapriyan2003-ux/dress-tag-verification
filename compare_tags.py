@@ -2041,7 +2041,13 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     if sku_col is None:
         raise ValueError("Could not find an SKU column in the Excel sheet.")
 
-    excel_idx = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
+    excel_idx_sku = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
+    excel_idx_barcode = {}
+    if barcode_col:
+        for _, row in excel_df.iterrows():
+            bar_val = row.get(barcode_col)
+            if pd.notna(bar_val) and str(bar_val).strip():
+                excel_idx_barcode[str(bar_val).strip()] = row
 
     if tag_type == "B2B Box Sticker tag file":
         field_map = [
@@ -2071,7 +2077,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
     for _, tag in pdf_df.iterrows():
         pdf_sku_norm = normalize_sku(tag["SKU"])
-        excel_row = excel_idx.get(pdf_sku_norm)
+        pdf_barcode = str(tag.get("EAN") or tag.get("Barcode") or "").strip()
+        
+        # 1. Lookup by SKU first
+        excel_row = excel_idx_sku.get(pdf_sku_norm)
+        
+        # 2. Fallback to lookup by Barcode/GTIN if SKU is not found
+        if excel_row is None and pdf_barcode:
+            excel_row = excel_idx_barcode.get(pdf_barcode)
 
         is_simulated = False
         if excel_row is None:
