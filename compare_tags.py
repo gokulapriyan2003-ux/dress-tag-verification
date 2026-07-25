@@ -1598,6 +1598,19 @@ def normalize_color(x):
     return res_str
 
 
+def normalize_category_value(x):
+    if not x:
+        return ""
+    s = str(x).strip().upper().replace("'", "").replace("’", "")
+    if "WOMEN" in s:
+        return "WOMENS"
+    if "MEN" in s:
+        return "MENS"
+    if "KID" in s or "BOY" in s or "GIRL" in s:
+        return "KIDS"
+    return s
+
+
 def normalize_number(x):
     if x is None or x == "":
         return None
@@ -1851,6 +1864,20 @@ def clean_prefix(prefix):
     return p
 
 
+def get_updated_fit(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                fit = row.get("FIT")
+                if pd.notna(fit):
+                    return str(fit).strip()
+    return None
+
+
 def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
     if not gsheet_dfs:
         return None
@@ -2006,6 +2033,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     size_col = find_col(excel_df, "SIZE")
     color_col = find_col(excel_df, "COLOUR", "COLOR")
     qty_col = find_col(excel_df, "PACK QTY", "NET QTY", "QTY", "TAG QTY")
+    category_col = find_col(excel_df, "CATEGORY", "GENDER")
 
     if sku_col is None:
         raise ValueError("Could not find an SKU column in the Excel sheet.")
@@ -2026,6 +2054,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     else:
         field_map = [
             ("Description", desc_col, normalize_text),
+            ("Fit", None, normalize_text),
+            ("Category", category_col, normalize_category_value),
             ("MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
@@ -2095,6 +2125,23 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         excel_val = None
                 else:
                     excel_val = None
+            elif field_name == "Fit":
+                pdf_val = tag.get("Fit")
+                excel_val = get_updated_fit(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+            elif field_name == "Category":
+                pdf_val = tag.get("Category")
+                if excel_col:
+                    excel_val = excel_row.get(excel_col)
+                else:
+                    gender = detect_gender_from_sku(tag.get("SKU"))
+                    if gender == "WOMENS":
+                        excel_val = "Women's"
+                    elif gender == "MENS":
+                        excel_val = "Men's"
+                    elif gender == "KIDS":
+                        excel_val = "Kid's"
+                    else:
+                        excel_val = None
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col)
                 _, _, extracted_size = extract_sku_details(excel_sku)
@@ -2170,6 +2217,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 p_base, p_batch = get_normalized_lot_parts(pdf_norm)
                 e_base, e_batch = get_normalized_lot_parts(excel_norm)
                 is_match = (p_base == e_base and p_batch == e_batch)
+                status = "✅ Match" if is_match else "❌ Mismatch"
+            elif field_name == "Fit":
+                is_match = (
+                    pdf_norm == excel_norm
+                    or (bool(pdf_norm) and bool(excel_norm) and (
+                        pdf_norm in excel_norm
+                        or excel_norm in pdf_norm
+                    ))
+                )
                 status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "Color":
                 is_match = (
