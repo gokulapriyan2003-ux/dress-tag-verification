@@ -2073,15 +2073,27 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         pdf_sku_norm = normalize_sku(tag["SKU"])
         excel_row = excel_idx.get(pdf_sku_norm)
 
+        is_simulated = False
         if excel_row is None:
-            report_rows.append({
-                "SKU": tag["SKU"],
-                "Field": "SKU",
-                "PDF Value": tag["SKU"],
-                "Excel Value": None,
-                "Status": "❌ Not found in Excel",
-            })
-            continue
+            style, color_code, size_code = extract_sku_details(pdf_sku_norm)
+            if style:
+                is_simulated = True
+                excel_row = {
+                    sku_col: pdf_sku_norm,
+                    barcode_col: None,
+                    size_col: size_code,
+                    color_col: color_map.get(color_code, color_code),
+                    desc_col: None
+                }
+            else:
+                report_rows.append({
+                    "SKU": tag["SKU"],
+                    "Field": "SKU",
+                    "PDF Value": tag["SKU"],
+                    "Excel Value": None,
+                    "Status": "❌ Not found in Excel",
+                })
+                continue
 
         matched_excel_skus.add(pdf_sku_norm)
 
@@ -2242,7 +2254,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 )
                 status = "✅ Match" if is_match else "❌ Mismatch"
             else:
-                status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
+                if field_name == "EAN" and is_simulated:
+                    status = "❌ Not found in Excel"
+                else:
+                    status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
             report_rows.append({
                 "SKU": tag["SKU"],
                 "Field": field_name,
