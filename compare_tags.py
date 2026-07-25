@@ -1663,12 +1663,15 @@ def clean_style_for_gsheet(style):
 
 def detect_gender_from_sku(sku):
     s = str(sku).strip().upper()
-    if s.startswith(("BT", "KD", "GP")):
-        return "KIDS"
-    if s.startswith(("WT", "WP", "WS")):
+    if not s:
+        return None
+    first_char = s[0]
+    if first_char == "W":
         return "WOMENS"
-    if s.startswith(("MT", "MP", "MS")):
+    if first_char == "M":
         return "MENS"
+    if first_char in ["K", "B", "G"]:
+        return "KIDS"
     # Fallback to check size
     try:
         _, _, size = extract_sku_details(s)
