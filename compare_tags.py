@@ -2018,8 +2018,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Lot No (Google Sheet)", None, normalize_text),
             ("Lot No (GS1 Master)", lot_col, normalize_text),
             ("Qty", qty_col, normalize_number),
-            ("Total MRP (Google Sheet)", None, normalize_number),
-            ("Total MRP (GS1 Master)", total_mrp_col, normalize_number),
+            ("Total MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
@@ -2027,8 +2026,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     else:
         field_map = [
             ("Description", desc_col, normalize_text),
-            ("MRP (Google Sheet)", None, normalize_number),
-            ("MRP (GS1 Master)", mrp_col, normalize_number),
+            ("MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
@@ -2078,13 +2076,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
-            elif field_name == "MRP (Google Sheet)":
+            elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
                 excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
-            elif field_name == "MRP (GS1 Master)":
-                pdf_val = tag.get("MRP")
-                excel_val = excel_row.get(excel_col) if excel_col else None
-            elif field_name == "Total MRP (Google Sheet)":
+            elif field_name == "Total MRP":
                 pdf_val = tag.get("Total MRP")
                 if pdf_val is None:
                     continue
@@ -2100,11 +2095,6 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         excel_val = None
                 else:
                     excel_val = None
-            elif field_name == "Total MRP (GS1 Master)":
-                pdf_val = tag.get("Total MRP")
-                if pdf_val is None:
-                    continue
-                excel_val = excel_row.get(excel_col) if excel_col else None
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col)
                 _, _, extracted_size = extract_sku_details(excel_sku)
