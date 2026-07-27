@@ -72,6 +72,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     descriptions = []
     single_mrps = []
     total_mrps = []
+    pack_quantities = []
     sku_to_huge_size = {}
 
     SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX", "06UK", "07UK", "08UK", "09UK", "10UK", "11UK", "12UK", "6UK", "7UK", "8UK", "9UK"}
@@ -154,6 +155,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                         single_mrps.append(price)
                     else:
                         total_mrps.append(price)
+                        pack_quantities.append(qty)
                     continue
 
                 matches = []
@@ -234,8 +236,12 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             if m:
                 mrp_val = float(m.group().replace(",", ""))
 
-        qty_raw = get("Qty:")
-        qty_val = int(qty_raw) if qty_raw and qty_raw.isdigit() else qty_raw
+        qty_val = None
+        if i < len(pack_quantities):
+            qty_val = pack_quantities[i]
+        else:
+            qty_raw = get("Qty:")
+            qty_val = int(qty_raw) if qty_raw and qty_raw.isdigit() else qty_raw
 
         style_raw = get("Style:")
         net_qty_raw = get("Net Quantity:")
@@ -2147,12 +2153,6 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
-                if tag_type == "B2B Bundle Sticker tag file":
-                    try:
-                        if float(pdf_val) > 0:
-                            excel_val = pdf_val
-                    except (ValueError, TypeError):
-                        pass
             elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
                 excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
