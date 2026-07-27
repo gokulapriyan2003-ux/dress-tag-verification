@@ -27,7 +27,7 @@ import urllib.request
 # (N = number of tags side-by-side in that row of the sheet). We split each
 # line on the label text itself to recover the N individual values in order.
 CANONICAL_LABELS = {
-    "Style:": ["Style:", "STYLE:", "Lot No:", "LOT NO:", "STYLE CODE:", "Style Code:"],
+    "Style:": ["Style:", "STYLE:", "Lot No:", "LOT NO:", "STYLE CODE:", "Style Code:", "LOT NO :", "LOT NO  :"],
     "Product:": ["Product:", "PRODUCT:", "Product Name:", "PRODUCT NAME:"],
     "Fit:": ["Fit:", "FIT:"],
     "Color:": ["Color:", "COLOR:", "Colour:", "COLOUR:"],
@@ -70,11 +70,20 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     barcodes = []
     cm_sizes = []
     descriptions = []
+    single_mrps = []
     total_mrps = []
     sku_to_huge_size = {}
 
     SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX", "06UK", "07UK", "08UK", "09UK", "10UK", "11UK", "12UK", "6UK", "7UK", "8UK", "9UK"}
     
+    def parse_vertical_reversed_size(w_text):
+        rev = w_text[::-1].strip().upper()
+        if "/" in rev:
+            base = rev.split("/")[0].strip()
+            if base in SIZE_SET:
+                return rev
+        return None
+
     def clean_reverse_size(sz):
         s = str(sz).strip().upper()
         if s == "LX": return "XL"
@@ -98,7 +107,12 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 sizes = []
                 for w in words:
                     text = w["text"].strip().upper()
-                    if text in SIZE_SET:
+                    vert = parse_vertical_reversed_size(text)
+                    if vert:
+                        w_copy = dict(w)
+                        w_copy["text"] = vert
+                        sizes.append(w_copy)
+                    elif text in SIZE_SET:
                         sizes.append(w)
                 for sku_w in skus:
                     sku_text = sku_w["text"]
@@ -131,6 +145,17 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             text = page.extract_text() or ""
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
             for idx_line, line in enumerate(raw_lines):
+                # 1. Check for MRP line containing quantities
+                m_mrp = re.search(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE)
+                if m_mrp:
+                    price = float(m_mrp.group(1).replace(",", ""))
+                    qty = int(m_mrp.group(2))
+                    if qty == 1:
+                        single_mrps.append(price)
+                    else:
+                        total_mrps.append(price)
+                    continue
+
                 matches = []
                 for lbl in LABELS:
                     pattern = re.compile(re.escape(lbl), re.IGNORECASE)
@@ -171,20 +196,6 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                             field_lists[canonical].append(val_str)
                     continue
 
-                # Check for Total MRP line
-                tot_tokens = line.split()
-                tot_mrps_line = []
-                for t in tot_tokens:
-                    m_tot = re.search(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*\d+\s*Nos?\s*\)", t, re.IGNORECASE)
-                    if m_tot:
-                        try:
-                            tot_mrps_line.append(float(m_tot.group(1).replace(",", "")))
-                        except ValueError:
-                            pass
-                if tot_mrps_line:
-                    total_mrps.extend(tot_mrps_line)
-                    continue
-
                 # barcode / cm-size lines contain several space-separated tokens
                 tokens = line.split()
                 found_barcodes = [t for t in tokens if BARCODE_RE.match(t)]
@@ -216,7 +227,9 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
 
         mrp_raw = get("MRP:")
         mrp_val = None
-        if mrp_raw:
+        if i < len(single_mrps):
+            mrp_val = single_mrps[i]
+        elif mrp_raw:
             m = re.search(r"[\d,]+\.?\d*", mrp_raw.replace("₹", ""))
             if m:
                 mrp_val = float(m.group().replace(",", ""))
@@ -224,9 +237,9 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         qty_raw = get("Qty:")
         qty_val = int(qty_raw) if qty_raw and qty_raw.isdigit() else qty_raw
 
-        style_raw = get("Style:") or get("Lot No:")
-        net_qty_raw = get("Net Quantity:") or get("Net Qty:")
-        mfd_raw = get("Manufactured On:") or get("MFD :")
+        style_raw = get("Style:")
+        net_qty_raw = get("Net Quantity:")
+        mfd_raw = get("Manufactured On:")
         sku_val = get("SKU Code:")
         desc_val = get("Product:") or (descriptions[i] if i < len(descriptions) else None)
         size_val = get("SIZE :")
@@ -2049,7 +2062,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             if pd.notna(bar_val) and str(bar_val).strip():
                 excel_idx_barcode[str(bar_val).strip()] = row
 
-    if tag_type == "B2B Box Sticker tag file":
+    if "B2B" in tag_type:
         field_map = [
             ("Description", desc_col, normalize_text),
             ("Lot No (Google Sheet)", None, normalize_text),
@@ -2134,6 +2147,12 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
+                if tag_type == "B2B Bundle Sticker tag file":
+                    try:
+                        if float(pdf_val) > 0:
+                            excel_val = pdf_val
+                    except (ValueError, TypeError):
+                        pass
             elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
                 excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
@@ -2144,6 +2163,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                 if tag_type == "B2B Box Sticker tag file":
                     p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
+                elif tag_type == "B2B Bundle Sticker tag file":
+                    p_qty = pack_qty_info or norm_fn(excel_row.get(qty_col)) or 5.0
                 else:
                     p_qty = norm_fn(tag.get("Qty") or tag.get("Net Quantity")) or 1.0
                 if single_mrp and p_qty:
@@ -2350,7 +2371,12 @@ def main():
     print(f"Extracted {len(pdf_df)} tags from PDF.")
     print(f"Extracted {len(excel_df)} rows from Excel.")
 
-    tag_type = "B2B Box Sticker tag file" if "b2b" in os.path.basename(pdf_path).lower() or "box" in os.path.basename(pdf_path).lower() else "D2C Dress tag file"
+    if "bundle" in os.path.basename(pdf_path).lower():
+        tag_type = "B2B Bundle Sticker tag file"
+    elif any(x in os.path.basename(pdf_path).lower() for x in ["b2b", "box", "sticker"]):
+        tag_type = "B2B Box Sticker tag file"
+    else:
+        tag_type = "D2C Dress tag file"
     report_df = compare(pdf_df, excel_df, gsheet_dfs, tag_type=tag_type)
 
     n_mismatch = (report_df["Status"] != "✅ Match").sum()
