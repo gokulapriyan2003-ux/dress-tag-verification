@@ -356,6 +356,7 @@ def normalize_size(x):
         s = str(int(s[1:]))
 
     size_map = {
+        "XSML": "XS",
         "SML": "S",
         "SMALL": "S",
         "MED": "M",
@@ -394,6 +395,7 @@ def format_size_as_tag(size_str):
         return str(int(s[1:]))
 
     size_map = {
+        "XSML": "XS",
         "SML": "S",
         "MED": "M",
         "LAR": "L",
@@ -1960,6 +1962,32 @@ def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
 def extract_sku_details(sku_str):
     sku = str(sku_str).strip().upper()
     n = len(sku)
+
+    size_keywords = ["XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
+    
+    found_size = None
+    size_idx = -1
+    for sz_kw in size_keywords:
+        idx = sku.rfind(sz_kw)
+        if idx != -1:
+            if idx >= 5:
+                found_size = sz_kw
+                size_idx = idx
+                break
+
+    if found_size and size_idx != -1:
+        batch = sku[size_idx + len(found_size):]
+        left = sku[:size_idx]
+        if len(left) >= 5:
+            color = left[-3:]
+            rest = left[:-3]
+            if rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "BT", "GP", "KD")):
+                style = rest[2:]
+            elif rest.startswith(("M", "W", "K", "B", "G")):
+                style = rest[1:]
+            else:
+                style = rest
+            return style, color, found_size
 
     rules = {
         11: (2, 4, 0),
