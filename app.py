@@ -218,11 +218,29 @@ if st.button("Run Verification", type="primary"):
 
                 # Provide Download Link
                 if os.path.exists(out_path):
+                    import re
+                    style_codes = []
+                    if "Style" in pdf_df.columns:
+                        style_codes = [str(x).strip() for x in pdf_df["Style"].dropna().unique() if str(x).strip()]
+                    elif "Lot No (Google Sheet)" in report_df.columns:
+                        style_codes = [str(x).strip() for x in report_df["Lot No (Google Sheet)"].dropna().unique() if str(x).strip()]
+                    
+                    cleaned_styles = []
+                    for code in style_codes:
+                        cleaned = re.sub(r"[\\/*?:\"<>|]", "_", code)
+                        if cleaned:
+                            cleaned_styles.append(cleaned)
+                            
+                    if cleaned_styles:
+                        dl_filename = f"{'_'.join(cleaned_styles)}_comparison_report.xlsx"
+                    else:
+                        dl_filename = "tag_comparison_report.xlsx"
+
                     with open(out_path, "rb") as file:
                         btn = st.download_button(
-                            label="Download Excel Comparison Report",
+                            label=f"Download {dl_filename}",
                             data=file,
-                            file_name="tag_comparison_report.xlsx",
+                            file_name=dl_filename,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 
