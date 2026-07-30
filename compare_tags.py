@@ -75,10 +75,14 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
     pack_quantities = []
     sku_to_huge_size = {}
 
-    SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX", "06UK", "07UK", "08UK", "09UK", "10UK", "11UK", "12UK", "6UK", "7UK", "8UK", "9UK"}
+    SIZE_SET = {"M", "L", "XL", "LX", "2XL", "LX2", "3XL", "LX3", "4XL", "LX4", "5XL", "LX5", "S", "XS", "SX", "XXL", "LXX", "06UK", "07UK", "08UK", "09UK", "10UK", "11UK", "12UK", "6UK", "7UK", "8UK", "9UK", "08Y", "10Y", "12Y", "14Y", "2Y", "4Y", "6Y", "8Y"}
     
     def parse_vertical_reversed_size(w_text):
         rev = w_text[::-1].strip().upper()
+        if rev in ["S/H", "S/F"]:
+            return None
+        if rev.startswith("Y") and len(rev) >= 2 and rev[1:].isdigit():
+            return rev[::-1]
         if "/" in rev:
             base = rev.split("/")[0].strip()
             if base in SIZE_SET:
@@ -1963,7 +1967,7 @@ def extract_sku_details(sku_str):
     sku = str(sku_str).strip().upper()
     n = len(sku)
 
-    size_keywords = ["XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
+    size_keywords = ["08Y", "10Y", "12Y", "14Y", "02Y", "04Y", "06Y", "2Y", "4Y", "6Y", "8Y", "XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
     
     found_size = None
     size_idx = -1
