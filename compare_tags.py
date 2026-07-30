@@ -1887,7 +1887,7 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
 def clean_prefix(prefix):
     p = str(prefix).strip().upper()
     category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G"}
-    if p and p[0] in category_letters:
+    if len(p) > 1 and p[0] in category_letters:
         p = p[1:]
     return p
 
