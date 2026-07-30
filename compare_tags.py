@@ -1982,19 +1982,27 @@ def extract_sku_details(sku_str):
 
     size_keywords = ["08Y", "10Y", "12Y", "14Y", "02Y", "04Y", "06Y", "2Y", "4Y", "6Y", "8Y", "XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
     
-    found_size = None
-    size_idx = -1
-    for sz_kw in size_keywords:
-        idx = sku.rfind(sz_kw)
-        if idx != -1:
-            if idx >= 5:
-                found_size = sz_kw
-                size_idx = idx
-                break
+    if sku.endswith(("2PK", "3PK")):
+        batch = sku[-6:]
+        sku_without_batch = sku[:-6]
+    else:
+        m = re.search(r"\d+$", sku)
+        if m:
+            batch = m.group()
+            sku_without_batch = sku[:-len(batch)]
+        else:
+            batch = ""
+            sku_without_batch = sku
 
-    if found_size and size_idx != -1:
-        batch = sku[size_idx + len(found_size):]
-        left = sku[:size_idx]
+    found_size = None
+    for sz_kw in size_keywords:
+        if sku_without_batch.endswith(sz_kw):
+            found_size = sz_kw
+            break
+
+    if found_size:
+        size_idx = len(sku_without_batch) - len(found_size)
+        left = sku_without_batch[:size_idx]
         if len(left) >= 5:
             color = left[-3:]
             rest = left[:-3]
