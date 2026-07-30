@@ -163,15 +163,16 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
             for idx_line, line in enumerate(raw_lines):
                 # 1. Check for MRP line containing quantities
-                m_mrp = re.search(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE)
-                if m_mrp:
-                    price = float(m_mrp.group(1).replace(",", ""))
-                    qty = int(m_mrp.group(2))
-                    if qty == 1:
-                        single_mrps.append(price)
-                    else:
-                        total_mrps.append(price)
-                        pack_quantities.append(qty)
+                mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE))
+                if mrp_matches:
+                    for m in mrp_matches:
+                        price = float(m.group(1).replace(",", ""))
+                        qty = int(m.group(2))
+                        if qty == 1:
+                            single_mrps.append(price)
+                        else:
+                            total_mrps.append(price)
+                            pack_quantities.append(qty)
                     continue
 
                 matches = []
