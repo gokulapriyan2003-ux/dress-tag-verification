@@ -100,6 +100,18 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         if s == "LXX": return "XXL"
         return s
 
+    def extract_single_desc_from_repeating(s):
+        s = str(s).strip()
+        words = s.split()
+        n_words = len(words)
+        for k in range(2, 9):
+            if n_words % k == 0 or n_words > k:
+                pattern = " ".join(words[:k])
+                re_pattern = r"^(" + re.escape(pattern) + r"\s*)+$"
+                if re.match(re_pattern, s):
+                    return pattern
+        return s
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -177,23 +189,23 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                         last_end = end
                 
                 if filtered_matches:
+                    has_lot_no = any("LOT NO" in lbl.upper() for _, _, lbl in filtered_matches)
+                    if has_lot_no and idx_line > 0:
+                        prev_line = raw_lines[idx_line - 1]
+                        lots_count = sum(1 for _, _, lbl in filtered_matches if "LOT NO" in lbl.upper())
+                        if lots_count > 0:
+                            if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
+                                parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
+                                if len(parts) != lots_count:
+                                    single_desc = extract_single_desc_from_repeating(prev_line)
+                                    parts = [single_desc] * lots_count
+                                descriptions.extend(parts)
+
                     for i, (start, end, lbl) in enumerate(filtered_matches):
                         canonical = LABEL_TO_CANONICAL[lbl]
                         val_start = end
                         val_end = filtered_matches[i+1][0] if i+1 < len(filtered_matches) else len(line)
                         val_str = line[val_start:val_end].strip()
-                        
-                        if canonical == "Lot No:" and idx_line > 0:
-                            prev_line = raw_lines[idx_line - 1]
-                            lots_count = len(val_str.split("  "))
-                            if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
-                                parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
-                                if len(parts) == lots_count:
-                                    descriptions.extend(parts)
-                                else:
-                                    chunk_len = max(1, len(prev_line) // lots_count)
-                                    single_desc = prev_line[:chunk_len].strip()
-                                    descriptions.extend([single_desc] * lots_count)
 
                         if canonical not in ["Product:", "Description"]:
                             parts = [p.strip() for p in val_str.split("  ") if p.strip()]
