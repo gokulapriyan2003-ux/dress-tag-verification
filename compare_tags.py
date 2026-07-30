@@ -2113,7 +2113,17 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             if pd.notna(bar_val) and str(bar_val).strip():
                 excel_idx_barcode[str(bar_val).strip()] = row
 
-    if "B2B" in tag_type:
+    if tag_type == "B2B Bundle Sticker tag file":
+        field_map = [
+            ("Lot No (Google Sheet)", None, normalize_text),
+            ("Lot No (GS1 Master)", lot_col, normalize_text),
+            ("Qty", qty_col, normalize_number),
+            ("Total MRP", None, normalize_number),
+            ("SKU", sku_col, normalize_sku),
+            ("EAN", barcode_col, normalize_text),
+            ("Size", size_col, normalize_size),
+        ]
+    elif tag_type == "B2B Box Sticker tag file":
         field_map = [
             ("Description", desc_col, normalize_text),
             ("Lot No (Google Sheet)", None, normalize_text),
