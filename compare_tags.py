@@ -2297,7 +2297,23 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
                 p_base, p_batch = get_normalized_lot_parts(pdf_norm)
                 e_base, e_batch = get_normalized_lot_parts(excel_norm)
-                is_match = (p_base == e_base and p_batch == e_batch)
+                
+                def clean_lot_base(base):
+                    b = str(base).strip().upper()
+                    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G"}
+                    if len(b) > 1 and b[0] in category_letters:
+                        b = b[1:]
+                    elif len(b) == 1 and b in category_letters:
+                        b = ""
+                    return b
+
+                p_base_clean = clean_lot_base(p_base)
+                e_base_clean = clean_lot_base(e_base)
+                
+                base_match = (p_base_clean == e_base_clean)
+                batch_match = (not p_batch or not e_batch or match_batch_code(p_batch, e_batch))
+                
+                is_match = base_match and batch_match
                 status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "Fit":
                 is_match = (
