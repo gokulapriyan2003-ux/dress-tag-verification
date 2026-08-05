@@ -158,7 +158,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         pass
 
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
+        for page_num, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
             for idx_line, line in enumerate(raw_lines):
@@ -192,15 +192,16 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 if filtered_matches:
                     has_lot_no = any("LOT NO" in lbl.upper() for _, _, lbl in filtered_matches)
                     if has_lot_no and idx_line > 0:
-                        prev_line = raw_lines[idx_line - 1]
-                        lots_count = sum(1 for _, _, lbl in filtered_matches if "LOT NO" in lbl.upper())
-                        if lots_count > 0:
-                            if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
-                                parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
-                                if len(parts) != lots_count:
-                                    single_desc = extract_single_desc_from_repeating(prev_line)
-                                    parts = [single_desc] * lots_count
-                                descriptions.extend(parts)
+                        if not (page_num == 0 and idx_line < 10):
+                            prev_line = raw_lines[idx_line - 1]
+                            lots_count = sum(1 for _, _, lbl in filtered_matches if "LOT NO" in lbl.upper())
+                            if lots_count > 0:
+                                if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
+                                    parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
+                                    if len(parts) != lots_count:
+                                        single_desc = extract_single_desc_from_repeating(prev_line)
+                                        parts = [single_desc] * lots_count
+                                    descriptions.extend(parts)
 
                     for i, (start, end, lbl) in enumerate(filtered_matches):
                         canonical = LABEL_TO_CANONICAL[lbl]
@@ -2131,6 +2132,17 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
         ]
+    elif tag_type == "Blank Bundle Sticker tag file":
+        field_map = [
+            ("Color", color_col, normalize_color),
+            ("Lot No (Google Sheet)", None, normalize_text),
+            ("Lot No (GS1 Master)", lot_col, normalize_text),
+            ("Qty", qty_col, normalize_number),
+            ("Total MRP", None, normalize_number),
+            ("SKU", sku_col, normalize_sku),
+            ("EAN", barcode_col, normalize_text),
+            ("Size", size_col, normalize_size),
+        ]
     elif tag_type == "B2B Box Sticker tag file":
         field_map = [
             ("Description", desc_col, normalize_text),
@@ -2261,6 +2273,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if not pdf_val:
                     pdf_val = excel_val
             elif field_name == "Color":
+                if tag_type == "Blank Bundle Sticker tag file":
+                    pdf_val = tag.get("Description") or tag.get("Product")
                 if excel_col and pd.notna(excel_row.get(excel_col)):
                     excel_val = excel_row.get(excel_col)
                 else:
@@ -2450,7 +2464,9 @@ def main():
     print(f"Extracted {len(pdf_df)} tags from PDF.")
     print(f"Extracted {len(excel_df)} rows from Excel.")
 
-    if "bundle" in os.path.basename(pdf_path).lower():
+    if "blank" in os.path.basename(pdf_path).lower():
+        tag_type = "Blank Bundle Sticker tag file"
+    elif "bundle" in os.path.basename(pdf_path).lower():
         tag_type = "B2B Bundle Sticker tag file"
     elif any(x in os.path.basename(pdf_path).lower() for x in ["b2b", "box", "sticker"]):
         tag_type = "B2B Box Sticker tag file"

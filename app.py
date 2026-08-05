@@ -83,9 +83,9 @@ else:
 st.subheader("1. Select Tag Verification Mode")
 tag_type = st.selectbox(
     "Tag Verification Type",
-    options=["D2C Dress tag file", "B2B Box Sticker tag file"],
+    options=["D2C Dress tag file", "B2B Box Sticker tag file", "B2B Bundle Sticker tag file", "Blank Bundle Sticker tag file"],
     index=0,
-    help="Select 'D2C Dress tag file' for standard dress tags or 'B2B Box Sticker tag file' for B2B box stickers (verifying Lot No, Pack Qty, Total MRP, EAN, SKU)."
+    help="Select D2C Dress tag file for standard dress tags, B2B Box Sticker tag file for B2B box stickers, B2B Bundle Sticker tag file for standard bundle stickers, or Blank Bundle Sticker tag file for bundle stickers verifying color instead of description."
 )
 
 # Step 2: Reference File Uploaders
