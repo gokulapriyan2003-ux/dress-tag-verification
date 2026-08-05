@@ -2124,16 +2124,6 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
     if tag_type == "B2B Bundle Sticker tag file":
         field_map = [
-            ("Lot No (Google Sheet)", None, normalize_text),
-            ("Lot No (GS1 Master)", lot_col, normalize_text),
-            ("Qty", qty_col, normalize_number),
-            ("Total MRP", None, normalize_number),
-            ("SKU", sku_col, normalize_sku),
-            ("EAN", barcode_col, normalize_text),
-            ("Size", size_col, normalize_size),
-        ]
-    elif tag_type == "Blank Bundle Sticker tag file":
-        field_map = [
             ("Color", color_col, normalize_color),
             ("Lot No (Google Sheet)", None, normalize_text),
             ("Lot No (GS1 Master)", lot_col, normalize_text),
@@ -2273,7 +2263,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if not pdf_val:
                     pdf_val = excel_val
             elif field_name == "Color":
-                if tag_type == "Blank Bundle Sticker tag file":
+                if tag_type == "B2B Bundle Sticker tag file":
                     pdf_val = tag.get("Description") or tag.get("Product")
                 if excel_col and pd.notna(excel_row.get(excel_col)):
                     excel_val = excel_row.get(excel_col)
@@ -2464,9 +2454,7 @@ def main():
     print(f"Extracted {len(pdf_df)} tags from PDF.")
     print(f"Extracted {len(excel_df)} rows from Excel.")
 
-    if "blank" in os.path.basename(pdf_path).lower():
-        tag_type = "Blank Bundle Sticker tag file"
-    elif "bundle" in os.path.basename(pdf_path).lower():
+    if any(x in os.path.basename(pdf_path).lower() for x in ["bundle", "blank"]):
         tag_type = "B2B Bundle Sticker tag file"
     elif any(x in os.path.basename(pdf_path).lower() for x in ["b2b", "box", "sticker"]):
         tag_type = "B2B Box Sticker tag file"
