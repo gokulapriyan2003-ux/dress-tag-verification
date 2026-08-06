@@ -192,7 +192,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 if filtered_matches:
                     has_lot_no = any("LOT NO" in lbl.upper() for _, _, lbl in filtered_matches)
                     if has_lot_no and idx_line > 0:
-                        if not (page_num == 0 and idx_line < 10):
+                        if not (page_num == 0 and idx_line < 7):
                             prev_line = raw_lines[idx_line - 1]
                             lots_count = sum(1 for _, _, lbl in filtered_matches if "LOT NO" in lbl.upper())
                             if lots_count > 0:
