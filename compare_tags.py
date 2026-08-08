@@ -1587,7 +1587,7 @@ color_map = {
 def normalize_color(x):
     if not x:
         return ""
-    c = str(x).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
+    c = str(x).strip().upper().replace("GREY", "GRAY").replace("LIGTH", "LIGHT").replace("_", " ").replace("-", " ")
     
     if c.startswith("LT "):
         c = "LIGHT " + c[3:]
@@ -1602,7 +1602,8 @@ def normalize_color(x):
     abbrevs = {
         "LT": "LIGHT",
         "DK": "DARK",
-        "BB": "BLUE BERRY"
+        "BB": "BLUE BERRY",
+        "LIGTH": "LIGHT"
     }
     
     words = []
