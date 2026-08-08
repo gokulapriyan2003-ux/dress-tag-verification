@@ -358,6 +358,21 @@ def normalize_size(x):
         return ""
     s = str(x).strip().upper()
 
+    kids_map = {
+        "08Y": "30",
+        "8Y": "30",
+        "10Y": "32",
+        "12Y": "34",
+        "14Y": "36",
+        "06Y": "28",
+        "6Y": "28",
+        "04Y": "26",
+        "4Y": "26",
+        "02Y": "24",
+        "2Y": "24",
+    }
+    s = kids_map.get(s, s)
+
     if "/" in s:
         s = s.split("/")[0].strip()
 
