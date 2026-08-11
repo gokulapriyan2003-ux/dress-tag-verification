@@ -2096,12 +2096,23 @@ def parse_product_name_info(prod_name_str):
     lot_no = parts[0] if parts else ""
     base_style = lot_no.split("/")[0] if "/" in lot_no else lot_no
 
-    pcs_match = re.search(r"(\d+)\s*PCS", str(prod_name_str), re.IGNORECASE)
-    pcs_qty = int(pcs_match.group(1)) if pcs_match else None
+    pcs_match = re.search(r"(\d+)\s*(PCS|NOS|PACK)", str(prod_name_str), re.IGNORECASE)
+    if pcs_match:
+        pcs_qty = int(pcs_match.group(1))
+        matched_str = pcs_match.group(0)
+    else:
+        sizes_pattern = r"\b(\d+)\s+(XSML|SML|MED|LAR|XLR|2XLR|3XLR|4XLR|5XLR|XXL|XXXL|2XL|3XL|4XL|5XL|XS|S|M|L|XL|S/36|M/38|L/40|XL/42|2XL/44|3XL/46)\s*$"
+        m = re.search(sizes_pattern, str(prod_name_str).strip(), re.IGNORECASE)
+        if m:
+            pcs_qty = int(m.group(1))
+            matched_str = m.group(1)
+        else:
+            pcs_qty = None
+            matched_str = None
 
     desc = " ".join(parts[1:])
-    if pcs_match:
-        desc = desc.split(pcs_match.group(0))[0].strip()
+    if matched_str:
+        desc = desc.split(matched_str)[0].strip()
     desc = re.sub(r"\s+(ASSORTED|BLACK|NAVY|GREY|GRAY|WHITE)$", "", desc, flags=re.IGNORECASE).strip()
 
     return lot_no, base_style, desc, pcs_qty
