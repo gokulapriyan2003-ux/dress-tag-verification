@@ -1790,7 +1790,7 @@ def match_batch_code(pdf_batch, gs_batch):
             if int(p_digits) == int(g_digits):
                 p_alpha = "".join([c for c in p_b if c.isalpha()])
                 g_alpha = "".join([c for c in g_b if c.isalpha()])
-                if p_alpha and p_alpha != g_alpha:
+                if p_alpha != g_alpha:
                     return False
                 return True
         except ValueError:
