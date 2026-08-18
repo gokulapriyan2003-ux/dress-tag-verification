@@ -177,6 +177,8 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 continue
                 
             for idx_line, line in enumerate(raw_lines):
+                if page_num == 0 and idx_line < 7:
+                    continue
                 # 1. Check for MRP line containing quantities
                 mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE))
                 if mrp_matches:
