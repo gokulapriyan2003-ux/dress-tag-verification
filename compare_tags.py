@@ -211,6 +211,8 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
 
                         if canonical not in ["Product:", "Description"]:
                             parts = [p.strip() for p in val_str.split("  ") if p.strip()]
+                            if not parts:
+                                parts = [""]
                             field_lists[canonical].extend(parts)
                         else:
                             field_lists[canonical].append(val_str)
@@ -2292,6 +2294,12 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             elif field_name == "Color":
                 if tag_type == "B2B Bundle Sticker tag file":
                     pdf_val = tag.get("Description") or tag.get("Product")
+                if not pdf_val or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() == "NAN":
+                    sku_to_use = tag.get("SKU") or excel_row.get(sku_col)
+                    if sku_to_use:
+                        _, extracted_color, _ = extract_sku_details(sku_to_use)
+                        if extracted_color:
+                            pdf_val = color_map.get(extracted_color, extracted_color)
                 if excel_col and pd.notna(excel_row.get(excel_col)):
                     excel_val = excel_row.get(excel_col)
                 else:
