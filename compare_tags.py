@@ -161,6 +161,21 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         for page_num, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
+            
+            # Check if this page contains tags (must have barcode or MRP)
+            has_tags = False
+            for line in raw_lines:
+                tokens = line.split()
+                if any(BARCODE_RE.match(t) for t in tokens):
+                    has_tags = True
+                    break
+                if "MRP" in line.upper():
+                    has_tags = True
+                    break
+            
+            if not has_tags:
+                continue
+                
             for idx_line, line in enumerate(raw_lines):
                 # 1. Check for MRP line containing quantities
                 mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE))
