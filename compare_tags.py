@@ -1581,6 +1581,46 @@ color_map = {
 }
 
 
+gsheet_color_map = {}
+
+def load_dynamic_color_map():
+    url = "https://docs.google.com/spreadsheets/d/1IjrPzNWndIzF0Cc4StaFmSNNFk2xW6icW47K8Th6F-U/export?format=xlsx"
+    dynamic_map = {}
+    try:
+        import urllib.request
+        import pandas as pd
+        import io
+        
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            xls = pd.ExcelFile(io.BytesIO(response.read()))
+            
+            # Read 'COLOUR CODE SHEET'
+            if 'COLOUR CODE SHEET' in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name='COLOUR CODE SHEET')
+                for _, row in df.iterrows():
+                    color = str(row.get('COLOR', '')).strip().upper()
+                    code = str(row.get('CODE', '')).strip().upper()
+                    if color and code and color != "NAN" and code != "NAN":
+                        dynamic_map[code] = color
+                        dynamic_map[color] = color
+            
+            # Also read 'EAN' sheet for any extra color mappings
+            if 'EAN' in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name='EAN')
+                for _, row in df.iterrows():
+                    color = str(row.get('COLOR', '')).strip().upper()
+                    code = str(row.get('CODE', '')).strip().upper()
+                    if color and code and color != "NAN" and code != "NAN":
+                        dynamic_map[code] = color
+                        dynamic_map[color] = color
+                        
+        print(f"Loaded {len(dynamic_map)} color mappings dynamically from Google Sheets.")
+    except Exception as e:
+        print(f"Warning: Could not load dynamic color map: {e}")
+        
+    return dynamic_map
+
 
 def normalize_color(x):
     if not x:
@@ -1611,7 +1651,9 @@ def normalize_color(x):
         words.append(abbrevs.get(w, w))
     c = " ".join(words)
             
-    res = color_map.get(c, c)
+    res = gsheet_color_map.get(c)
+    if not res:
+        res = color_map.get(c, c)
     res_str = str(res).strip().upper().replace("GREY", "GRAY").replace("_", " ").replace("-", " ")
     
     if res_str.startswith("LT "):
@@ -2110,6 +2152,9 @@ def extract_style_and_size_from_sku(sku_str):
 
 
 def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_type: str = "D2C Dress tag file") -> pd.DataFrame:
+    global gsheet_color_map
+    if not gsheet_color_map:
+        gsheet_color_map = load_dynamic_color_map()
     desc_col = find_col(excel_df, "PRODUCT NAME", "DESCRIPTION", "PRODUCT")
     lot_col = find_col(excel_df, "LOT NO", "LOT", "STYLE", "STYLE CODE")
     sku_col = find_col(excel_df, "SKU CODE", "SKU")
