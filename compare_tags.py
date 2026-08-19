@@ -2310,7 +2310,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     else:
                         excel_val = None
             elif field_name == "Size":
-                excel_sku = excel_row.get(sku_col)
+                excel_sku = excel_row.get(sku_col) or pdf_sku_norm
+                if not excel_sku or str(excel_sku).strip().upper() == "NAN" or str(excel_sku).strip() == "":
+                    excel_sku = pdf_sku_norm
                 _, _, extracted_size = extract_sku_details(excel_sku)
                 excel_val = format_size_as_tag(extracted_size) if extracted_size else None
                 if not pdf_val:
@@ -2319,17 +2321,24 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if tag_type == "B2B Bundle Sticker tag file":
                     pdf_val = tag.get("Description") or tag.get("Product")
                 if not pdf_val or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() == "NAN":
-                    sku_to_use = tag.get("SKU") or excel_row.get(sku_col)
+                    sku_to_use = tag.get("SKU") or excel_row.get(sku_col) or pdf_sku_norm
                     if sku_to_use:
                         _, extracted_color, _ = extract_sku_details(sku_to_use)
                         if extracted_color:
                             pdf_val = color_map.get(extracted_color, extracted_color)
-                if excel_col and pd.notna(excel_row.get(excel_col)):
-                    excel_val = excel_row.get(excel_col)
+                
+                db_color_val = excel_row.get(excel_col) if excel_col else None
+                if db_color_val and pd.notna(db_color_val) and str(db_color_val).strip() != "" and str(db_color_val).strip().upper() != "NAN":
+                    excel_val = db_color_val
                 else:
-                    excel_sku = excel_row.get(sku_col)
+                    excel_sku = excel_row.get(sku_col) or pdf_sku_norm
                     _, extracted_color, _ = extract_sku_details(excel_sku)
                     excel_val = color_map.get(extracted_color, extracted_color) if extracted_color else None
+            elif field_name == "SKU":
+                pdf_val = tag.get("SKU")
+                excel_val = excel_row.get(excel_col) if excel_col else None
+                if not excel_val or str(excel_val).strip().upper() == "NAN" or str(excel_val).strip() == "":
+                    excel_val = pdf_sku_norm
             elif field_name == "EAN":
                 pdf_val = tag.get("EAN") or tag.get("Barcode")
                 excel_val = excel_row.get(barcode_col) if barcode_col else None
