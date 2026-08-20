@@ -369,7 +369,31 @@ def normalize_sku(x):
 def normalize_text(x):
     if x is None:
         return ""
-    return str(x).strip().upper()
+    import re
+    s = str(x).strip().upper()
+    s = s.replace("-", " ").replace("/", " ").replace("_", " ")
+    
+    # Replace compound words and remove gender prefixes
+    replacements = {
+        "TRACKPANT": "TRACK PANT",
+        "TRACKPANTS": "TRACK PANT",
+        "TRACK PANTS": "TRACK PANT",
+        "TSHIRT": "T SHIRT",
+        "TSHIRTS": "T SHIRT",
+        "PANTS": "PANT",
+        "JOGGERS": "JOGGER",
+        "SHORTS": "SHORT",
+        "WOMENS": "",
+        "MENS": "",
+        "KIDS": "",
+        "BOYS": "",
+        "GIRLS": ""
+    }
+    for old, new in replacements.items():
+        s = re.sub(r"\b" + re.escape(old) + r"\b", new, s)
+        
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def normalize_size(x):
@@ -2148,7 +2172,27 @@ def extract_style_and_size_from_sku(sku_str):
     return style, size
 
 
+PRODUCT_GROUPS = [
+    {"PANT", "PANTS", "TRACKPANT", "TRACKPANTS", "JOGGER", "JOGGERS", "LOWER", "LOWERS", "TIGHTS", "LEGGINGS", "CAPRI"},
+    {"SHORTS"},
+    {"TSHIRT", "TSHIRTS", "TEE", "TEES", "SHIRT", "SHIRTS", "POLO", "POLOS", "CREWNECK", "JACKET", "JACKETS", "HOODIE", "HOODIES", "SWEATSHIRT", "SWEATSHIRTS", "BRA"},
+    {"SOCKS"},
+    {"SHOE", "SHOES"},
+    {"BOXER", "BOXERS", "INNERWEAR", "BRIEF", "BRIEFS"}
+]
 
+def check_conflicting_product_type(pdf_words, excel_words):
+    pdf_groups = set()
+    excel_groups = set()
+    for idx, grp in enumerate(PRODUCT_GROUPS):
+        if any(w in grp for w in pdf_words):
+            pdf_groups.add(idx)
+        if any(w in grp for w in excel_words):
+            excel_groups.add(idx)
+            
+    if pdf_groups and excel_groups and not pdf_groups.intersection(excel_groups):
+        return True
+    return False
 
 
 def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_type: str = "D2C Dress tag file") -> pd.DataFrame:
@@ -2356,13 +2400,16 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 p_words = set(re.findall(r"\w+", str(pdf_norm).upper()))
                 e_words = set(re.findall(r"\w+", str(excel_norm).upper()))
                 common_words = p_words.intersection(e_words)
+                has_conflict = check_conflicting_product_type(p_words, e_words)
                 is_match = (
-                    pdf_norm == excel_norm
-                    or len(common_words) >= 2
-                    or (bool(pdf_norm) and bool(excel_norm) and (
-                        pdf_norm in excel_norm
-                        or excel_norm in pdf_norm
-                    ))
+                    not has_conflict and (
+                        pdf_norm == excel_norm
+                        or len(common_words) >= 2
+                        or (bool(pdf_norm) and bool(excel_norm) and (
+                            pdf_norm in excel_norm
+                            or excel_norm in pdf_norm
+                        ))
+                    )
                 )
                 if not is_match:
                     g_desc = get_updated_description(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
@@ -2370,13 +2417,16 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         g_norm = norm_fn(g_desc)
                         g_words = set(re.findall(r"\w+", str(g_norm).upper()))
                         common_g_words = p_words.intersection(g_words)
+                        has_g_conflict = check_conflicting_product_type(p_words, g_words)
                         if (
-                            pdf_norm == g_norm
-                            or len(common_g_words) >= 2
-                            or (bool(pdf_norm) and bool(g_norm) and (
-                                pdf_norm in g_norm
-                                or g_norm in pdf_norm
-                            ))
+                            not has_g_conflict and (
+                                pdf_norm == g_norm
+                                or len(common_g_words) >= 2
+                                or (bool(pdf_norm) and bool(g_norm) and (
+                                    pdf_norm in g_norm
+                                    or g_norm in pdf_norm
+                                ))
+                            )
                         ):
                             is_match = True
                             excel_val = g_desc
