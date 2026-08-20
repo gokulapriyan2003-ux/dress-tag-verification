@@ -1649,7 +1649,7 @@ def load_dynamic_color_map():
 def normalize_color(x):
     if not x:
         return ""
-    c = str(x).strip().upper().replace("GREY", "GRAY").replace("LIGTH", "LIGHT").replace("_", " ").replace("-", " ")
+    c = str(x).strip().upper().replace("GREY", "GRAY").replace("LIGTH", "LIGHT").replace("CHILLI", "CHILI").replace("_", " ").replace("-", " ")
     
     if c.startswith("LT "):
         c = "LIGHT " + c[3:]
