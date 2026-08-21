@@ -1832,10 +1832,25 @@ def match_style_code(pdf_style_base, gs_style_base, tag_type="Standard Garment /
 def match_batch_code(pdf_batch, gs_batch):
     p_b = str(pdf_batch).strip().upper()
     g_b = str(gs_batch).strip().upper()
-    if g_b == "NAN" or g_b == "0" or not g_b:
-        g_b = ""
+    
+    def norm_b(b):
+        if b == "NAN" or b == "0" or not b:
+            return "1"
+        digits = "".join([c for c in b if c.isdigit()])
+        if digits:
+            try:
+                val = int(digits)
+                if val == 0:
+                    return "1"
+                return str(val)
+            except ValueError:
+                pass
+        return b
         
-    if p_b == g_b:
+    p_norm = norm_b(p_b)
+    g_norm = norm_b(g_b)
+    
+    if p_norm == g_norm:
         return True
         
     p_digits = "".join([c for c in p_b if c.isdigit()])
@@ -1843,12 +1858,18 @@ def match_batch_code(pdf_batch, gs_batch):
     
     if p_digits and g_digits:
         try:
-            if int(p_digits) == int(g_digits):
-                p_alpha = "".join([c for c in p_b if c.isalpha()])
-                g_alpha = "".join([c for c in g_b if c.isalpha()])
-                if p_alpha != g_alpha:
-                    return False
-                return True
+            p_val = int(p_digits)
+            g_val = int(g_digits)
+            if p_val == 0: p_val = 1
+            if g_val == 0: g_val = 1
+            if p_val != g_val:
+                return False
+                
+            p_alpha = "".join([c for c in p_b if c.isalpha()])
+            g_alpha = "".join([c for c in g_b if c.isalpha()])
+            if p_alpha and g_alpha and p_alpha != g_alpha:
+                return False
+            return True
         except ValueError:
             pass
             
@@ -2492,7 +2513,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 e_base_clean = clean_lot_base(e_base)
                 
                 base_match = (p_base_clean == e_base_clean)
-                batch_match = (not p_batch or not e_batch or match_batch_code(p_batch, e_batch))
+                batch_match = match_batch_code(p_batch, e_batch)
                 
                 is_match = base_match and batch_match
                 status = "✅ Match" if is_match else "❌ Mismatch"
