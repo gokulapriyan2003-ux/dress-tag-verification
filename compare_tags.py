@@ -366,6 +366,12 @@ def normalize_sku(x):
     return str(x).strip().upper()
 
 
+def normalize_lot(x):
+    if x is None:
+        return ""
+    return str(x).strip().upper()
+
+
 def normalize_text(x):
     if x is None:
         return ""
@@ -2232,8 +2238,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     if tag_type == "B2B Bundle Sticker tag file":
         field_map = [
             ("Color", color_col, normalize_color),
-            ("Lot No (Google Sheet)", None, normalize_text),
-            ("Lot No (GS1 Master)", lot_col, normalize_text),
+            ("Lot No (Google Sheet)", None, normalize_lot),
+            ("Lot No (GS1 Master)", lot_col, normalize_lot),
             ("Qty", qty_col, normalize_number),
             ("Total MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
@@ -2243,8 +2249,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     elif tag_type == "B2B Box Sticker tag file":
         field_map = [
             ("Description", desc_col, normalize_text),
-            ("Lot No (Google Sheet)", None, normalize_text),
-            ("Lot No (GS1 Master)", lot_col, normalize_text),
+            ("Lot No (Google Sheet)", None, normalize_lot),
+            ("Lot No (GS1 Master)", lot_col, normalize_lot),
             ("Qty", qty_col, normalize_number),
             ("Total MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
