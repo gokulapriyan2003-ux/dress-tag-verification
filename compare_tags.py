@@ -2100,7 +2100,7 @@ def extract_sku_details(sku_str):
         if len(left) >= 5:
             color = left[-3:]
             rest = left[:-3]
-            if rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "BT", "GP", "KD")):
+            if rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
                 style = rest[2:]
             elif rest.startswith(("M", "W", "K", "B", "G")):
                 style = rest[1:]
@@ -2288,6 +2288,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("EAN", barcode_col, normalize_text),
             ("Size", size_col, normalize_size),
             ("Color", color_col, normalize_color),
+            ("Qty", qty_col, normalize_number),
+            ("Lot No (Google Sheet)", None, normalize_lot),
+            ("Lot No (GS1 Master)", lot_col, normalize_lot),
         ]
 
     report_rows = []
@@ -2316,6 +2319,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     color_col: color_map.get(color_code, color_code),
                     desc_col: None
                 }
+                if lot_col:
+                    excel_row[lot_col] = style
             else:
                 report_rows.append({
                     "SKU": tag["SKU"],
@@ -2345,10 +2350,12 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_val = desc_info if desc_info else (excel_row.get(excel_col) if excel_col else None)
             elif field_name == "Lot No (Google Sheet)":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
-                excel_val = get_updated_lot_no(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                g_lot = get_updated_lot_no(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                excel_val = g_lot if g_lot and pd.notna(g_lot) and str(g_lot).strip() != "" and str(g_lot).strip().upper() != "NAN" else (tag.get("Style") or base_style_info)
             elif field_name == "Lot No (GS1 Master)":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
-                excel_val = lot_info if lot_info else (excel_row.get(excel_col) if excel_col else None)
+                db_lot = lot_info if lot_info else (excel_row.get(excel_col) if excel_col else None)
+                excel_val = db_lot if db_lot and pd.notna(db_lot) and str(db_lot).strip() != "" and str(db_lot).strip().upper() != "NAN" else (tag.get("Style") or base_style_info)
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
@@ -2513,7 +2520,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 e_base_clean = clean_lot_base(e_base)
                 
                 base_match = (p_base_clean == e_base_clean)
-                batch_match = match_batch_code(p_batch, e_batch)
+                if tag_type == "D2C Dress tag file" and field_name == "Lot No (GS1 Master)":
+                    batch_match = True
+                else:
+                    batch_match = match_batch_code(p_batch, e_batch)
                 
                 is_match = base_match and batch_match
                 status = "✅ Match" if is_match else "❌ Mismatch"
