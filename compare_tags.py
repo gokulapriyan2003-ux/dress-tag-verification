@@ -1952,8 +1952,8 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
 
 def clean_prefix(prefix):
     p = str(prefix).strip().upper()
-    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G"}
-    if len(p) > 1 and p[0] in category_letters:
+    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G", "I"}
+    while len(p) > 0 and p[0] in category_letters:
         p = p[1:]
     return p
 
@@ -2502,11 +2502,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 
                 def clean_lot_base(base):
                     b = str(base).strip().upper()
-                    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G"}
-                    if len(b) > 1 and b[0] in category_letters:
+                    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G", "I"}
+                    while len(b) > 0 and b[0] in category_letters:
                         b = b[1:]
-                    elif len(b) == 1 and b in category_letters:
-                        b = ""
                     return b
 
                 p_base_clean = clean_lot_base(p_base)
