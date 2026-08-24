@@ -1833,51 +1833,35 @@ def match_batch_code(pdf_batch, gs_batch):
     p_b = str(pdf_batch).strip().upper()
     g_b = str(gs_batch).strip().upper()
     
-    def norm_b(b):
-        if b == "NAN" or b == "0" or not b:
-            return "1"
-        digits = "".join([c for c in b if c.isdigit()])
-        if digits:
-            try:
-                val = int(digits)
-                if val == 0:
-                    return "1"
-                return str(val)
-            except ValueError:
-                pass
-        return b
-        
-    p_norm = norm_b(p_b)
-    g_norm = norm_b(g_b)
-    
-    if p_norm == g_norm:
-        return True
-        
     p_digits = "".join([c for c in p_b if c.isdigit()])
     g_digits = "".join([c for c in g_b if c.isdigit()])
     
-    if p_digits and g_digits:
+    p_alpha = "".join([c for c in p_b if c.isalpha()])
+    g_alpha = "".join([c for c in g_b if c.isalpha()])
+    
+    def get_val(dig):
+        if not dig:
+            return 1
         try:
-            p_val = int(p_digits)
-            g_val = int(g_digits)
-            if p_val == 0: p_val = 1
-            if g_val == 0: g_val = 1
-            if p_val != g_val:
-                return False
-                
-            p_alpha = "".join([c for c in p_b if c.isalpha()])
-            g_alpha = "".join([c for c in g_b if c.isalpha()])
-            if p_alpha and g_alpha and p_alpha != g_alpha:
-                return False
-            return True
+            val = int(dig)
+            return 1 if val == 0 else val
         except ValueError:
-            pass
+            return -1
             
-    if p_b and g_b and not p_digits and not g_digits:
-        if p_b in g_b or g_b in p_b:
-            return True
-            
-    return False
+    p_val = get_val(p_digits)
+    g_val = get_val(g_digits)
+    
+    if p_val != g_val:
+        return False
+        
+    if (not p_alpha or not g_alpha) and (p_alpha or g_alpha):
+        non_empty = p_alpha if p_alpha else g_alpha
+        if non_empty not in ["DT", "SB"]:
+            return False
+    elif p_alpha != g_alpha:
+        return False
+        
+    return True
 
 
 def append_sku_batch_to_style(pdf_style, pdf_sku):
@@ -1931,34 +1915,9 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
     
     # Check if SKU has suffix
     if not p_batch and pdf_sku:
-        sku_clean = str(pdf_sku).strip().upper()
-        n = len(sku_clean)
-        rules = {
-            11: (2, 4, 0),
-            12: (2, 4, 0),
-            13: (2, 5, 0),
-            14: (2, 4, 2),
-            15: (2, 4, 3),
-            16: (2, 5, 3),
-            17: (2, 8, 0),
-            18: (3, 6, 3),
-        }
-        if n in rules:
-            _, _, end_remove = rules[n]
-            if end_remove > 0:
-                suffix = sku_clean[-end_remove:]
-                has_alpha = any(c.isalpha() for c in suffix)
-                if has_alpha:
-                    import re
-                    match = re.match(r"^([A-Z]+)(0*)([0-9]+)$", suffix)
-                    if match:
-                        p_batch = match.group(1) + match.group(3)
-                    else:
-                        p_batch = suffix
-                else:
-                    suffix_digits = "".join([c for c in suffix if c.isdigit()])
-                    if suffix_digits:
-                        p_batch = str(int(suffix_digits))
+        res = extract_sku_details_with_batch(pdf_sku)
+        if res and len(res) == 4:
+            p_batch = res[3]
                         
     sku_gender = detect_gender_from_sku(pdf_sku)
     
@@ -2070,12 +2029,39 @@ def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
     return None
 
 
-def extract_sku_details(sku_str):
+def extract_sku_details_with_batch(sku_str):
     sku = str(sku_str).strip().upper()
     n = len(sku)
 
     size_keywords = ["08Y", "10Y", "12Y", "14Y", "02Y", "04Y", "06Y", "2Y", "4Y", "6Y", "8Y", "XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
     
+    found_size = None
+    size_pos = -1
+    for sz_kw in size_keywords:
+        pos = sku.find(sz_kw)
+        if pos != -1:
+            if pos >= 5:
+                found_size = sz_kw
+                size_pos = pos
+                break
+                
+    if found_size:
+        left = sku[:size_pos]
+        batch = sku[size_pos + len(found_size):]
+        
+        color = left[-3:]
+        rest = left[:-3]
+        
+        if rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
+            style = rest[2:]
+        elif rest.startswith(("M", "W", "K", "B", "G")):
+            style = rest[1:]
+        else:
+            style = rest
+            
+        return style, color, found_size, batch
+
+    # Fallback to legacy length rules
     if sku.endswith(("2PK", "3PK")):
         batch = sku[-6:]
         sku_without_batch = sku[:-6]
@@ -2106,7 +2092,7 @@ def extract_sku_details(sku_str):
                 style = rest[1:]
             else:
                 style = rest
-            return style, color, found_size
+            return style, color, found_size, batch
 
     rules = {
         11: (2, 4, 0),
@@ -2120,7 +2106,7 @@ def extract_sku_details(sku_str):
     }
 
     if n not in rules:
-        return None, None, None
+        return None, None, None, ""
 
     if n == 12:
         body = sku[2:]
@@ -2133,7 +2119,7 @@ def extract_sku_details(sku_str):
             style = style[1:]
         color = body[style_len:style_len+3]
         size = body[style_len+3:]
-        return style, color, size
+        return style, color, size, ""
 
     if n == 15:
         apparel_sizes = {"MED", "LAR", "XLR", "2XL", "3XL", "4XL", "5XL", "SML"}
@@ -2143,14 +2129,14 @@ def extract_sku_details(sku_str):
                 style = style[1:]
             color = sku[-6:-3]
             size = sku[-3:]
-            return style, color, size
+            return style, color, size, ""
         elif sku[-6:-3] in apparel_sizes:
             style = sku[2:-9]
             if len(style) >= 3 and style[1:3] == "OR":
                 style = style[1:]
             color = sku[-9:-6]
             size = sku[-6:-3]
-            return style, color, size
+            return style, color, size, ""
 
     start_remove, style_len, end_remove = rules[n]
     body = sku[start_remove:]
@@ -2163,7 +2149,14 @@ def extract_sku_details(sku_str):
     color = body[style_len:style_len+3]
     size = body[-3:]
 
-    return style, color, size
+    return style, color, size, ""
+
+
+def extract_sku_details(sku_str):
+    res = extract_sku_details_with_batch(sku_str)
+    if res:
+        return res[0], res[1], res[2]
+    return None, None, None
 
 
 def parse_product_name_info(prod_name_str):
