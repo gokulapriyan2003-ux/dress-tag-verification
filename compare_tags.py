@@ -1717,7 +1717,11 @@ def normalize_category_value(x):
         return "WOMENS"
     if "MEN" in s:
         return "MENS"
-    if "KID" in s or "BOY" in s or "GIRL" in s:
+    if "BOY" in s:
+        return "BOYS"
+    if "GIRL" in s:
+        return "GIRLS"
+    if "KID" in s:
         return "KIDS"
     return s
 
@@ -1781,7 +1785,11 @@ def detect_gender_from_sku(sku):
         return "WOMENS"
     if first_char == "M":
         return "MENS"
-    if first_char in ["K", "B", "G"]:
+    if first_char == "B":
+        return "BOYS"
+    if first_char == "G":
+        return "GIRLS"
+    if first_char == "K":
         return "KIDS"
     # Fallback to check size
     try:
@@ -2386,6 +2394,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         excel_val = "Women's"
                     elif gender == "MENS":
                         excel_val = "Men's"
+                    elif gender == "BOYS":
+                        excel_val = "Boy's"
+                    elif gender == "GIRLS":
+                        excel_val = "Girl's"
                     elif gender == "KIDS":
                         excel_val = "Kid's"
                     else:
