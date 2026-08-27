@@ -1774,6 +1774,19 @@ def clean_style_for_gsheet(style):
     elif s.startswith("SOR"):
         s = s[2:]
     return s
+def parse_fit_from_text(text):
+    import pandas as pd
+    if not text or pd.isna(text):
+        return None
+    t = str(text).upper()
+    if "REGULAR" in t:
+        return "Regular Fit"
+    if "SLIM" in t:
+        return "Slim Fit"
+    if "OVERSIZED" in t or "OVERSIZE" in t:
+        return "Oversized Fit"
+    return None
+
 
 
 def detect_gender_from_sku(sku):
@@ -2362,12 +2375,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
             elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
-                excel_val = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                g_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                excel_val = g_mrp if g_mrp else (excel_row.get(mrp_col) if mrp_col else None)
             elif field_name == "Total MRP":
                 pdf_val = tag.get("Total MRP")
                 if pdf_val is None:
                     continue
                 single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                if not single_mrp:
+                    single_mrp = excel_row.get(mrp_col) if mrp_col else None
                 if tag_type == "B2B Box Sticker tag file":
                     p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
                 elif tag_type == "B2B Bundle Sticker tag file":
@@ -2383,7 +2399,13 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     excel_val = None
             elif field_name == "Fit":
                 pdf_val = tag.get("Fit")
-                excel_val = get_updated_fit(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                g_fit = get_updated_fit(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                if g_fit:
+                    excel_val = g_fit
+                else:
+                    prod_name = excel_row.get(desc_col) if desc_col else None
+                    prod_desc = excel_row.get("Product Description")
+                    excel_val = parse_fit_from_text(prod_name) or parse_fit_from_text(prod_desc)
             elif field_name == "Category":
                 pdf_val = tag.get("Category")
                 if excel_col:
