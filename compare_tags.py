@@ -1752,8 +1752,8 @@ def find_col(df, *candidates):
         cand_u = cand.upper().strip()
         for cu, orig in cols_upper.items():
             if cand_u in cu:
-                # Exclude columns containing dates/locations for MRP
-                if cand_u == "MRP" and any(x in cu for x in ["DATE", "LOCATION", "ACTIVE"]):
+                # Exclude columns containing dates/locations/totals for MRP
+                if cand_u == "MRP" and any(x in cu for x in ["DATE", "LOCATION", "ACTIVE", "TOTAL", "BOX", "BUNDLE", "PACK"]):
                     continue
                 return orig
     # Fallback to match anything if no clean match found
@@ -2381,22 +2381,24 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 pdf_val = tag.get("Total MRP")
                 if pdf_val is None:
                     continue
-                single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
-                if not single_mrp:
-                    single_mrp = excel_row.get(mrp_col) if mrp_col else None
-                if tag_type == "B2B Box Sticker tag file":
-                    p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
-                elif tag_type == "B2B Bundle Sticker tag file":
-                    p_qty = pack_qty_info or norm_fn(excel_row.get(qty_col)) or 5.0
-                else:
-                    p_qty = norm_fn(tag.get("Qty") or tag.get("Net Quantity")) or 1.0
-                if single_mrp and p_qty:
-                    try:
-                        excel_val = float(single_mrp) * float(p_qty)
-                    except (ValueError, TypeError):
+                excel_val = excel_row.get(total_mrp_col) if (total_mrp_col and pd.notna(excel_row.get(total_mrp_col)) and str(excel_row.get(total_mrp_col)).strip() != "" and str(excel_row.get(total_mrp_col)).strip().upper() != "NAN") else None
+                if excel_val is None:
+                    single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                    if not single_mrp:
+                        single_mrp = excel_row.get(mrp_col) if mrp_col else None
+                    if tag_type == "B2B Box Sticker tag file":
+                        p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
+                    elif tag_type == "B2B Bundle Sticker tag file":
+                        p_qty = pack_qty_info or norm_fn(excel_row.get(qty_col)) or 5.0
+                    else:
+                        p_qty = norm_fn(tag.get("Qty") or tag.get("Net Quantity")) or 1.0
+                    if single_mrp and p_qty:
+                        try:
+                            excel_val = float(single_mrp) * float(p_qty)
+                        except (ValueError, TypeError):
+                            excel_val = None
+                    else:
                         excel_val = None
-                else:
-                    excel_val = None
             elif field_name == "Fit":
                 pdf_val = tag.get("Fit")
                 g_fit = get_updated_fit(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
