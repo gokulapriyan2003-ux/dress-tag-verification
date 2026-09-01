@@ -2357,13 +2357,23 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             style, color_code, size_code = extract_sku_details(pdf_sku_norm)
             if style:
                 is_simulated = True
+                mapped_c = gsheet_color_map.get(color_code) or color_map.get(color_code, color_code)
                 excel_row = {
-                    sku_col: pdf_sku_norm,
-                    barcode_col: None,
-                    size_col: size_code,
-                    color_col: color_map.get(color_code, color_code),
-                    desc_col: None
+                    "SKU": pdf_sku_norm,
+                    "Size": size_code,
+                    "Color": mapped_c,
+                    "Style": style
                 }
+                if sku_col:
+                    excel_row[sku_col] = pdf_sku_norm
+                if barcode_col:
+                    excel_row[barcode_col] = None
+                if size_col:
+                    excel_row[size_col] = size_code
+                if color_col:
+                    excel_row[color_col] = mapped_c
+                if desc_col:
+                    excel_row[desc_col] = None
                 if lot_col:
                     excel_row[lot_col] = style
             else:
@@ -2493,11 +2503,23 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 
                 db_color_val = excel_row.get(excel_col) if excel_col else None
                 if db_color_val and pd.notna(db_color_val) and str(db_color_val).strip() != "" and str(db_color_val).strip().upper() != "NAN":
-                    excel_val = db_color_val
+                    excel_val = str(db_color_val).strip()
                 else:
-                    excel_sku = excel_row.get(sku_col) or pdf_sku_norm
-                    _, extracted_color, _ = extract_sku_details(excel_sku)
-                    excel_val = color_map.get(extracted_color, extracted_color) if extracted_color else None
+                    # Fetch color code from provided PDF SKU and look up in EAN rules Google Sheet
+                    sku_for_color = str(tag.get("SKU") or pdf_sku_norm or (excel_row.get(sku_col) if excel_row is not None and sku_col else "") or "").strip()
+                    extracted_color = None
+                    if sku_for_color:
+                        res = extract_sku_details_with_batch(sku_for_color)
+                        if res and res[1]:
+                            extracted_color = res[1]
+                    if not extracted_color and pdf_sku_norm:
+                        res = extract_sku_details_with_batch(pdf_sku_norm)
+                        if res and res[1]:
+                            extracted_color = res[1]
+                    if extracted_color:
+                        excel_val = gsheet_color_map.get(extracted_color) or color_map.get(extracted_color, extracted_color)
+                    else:
+                        excel_val = None
             elif field_name == "SKU":
                 pdf_val = tag.get("SKU")
                 excel_val = excel_row.get(excel_col) if excel_col else None
