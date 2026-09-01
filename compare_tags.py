@@ -1819,8 +1819,8 @@ def gender_matches(row_gender, sku_gender):
         return True
     rg = str(row_gender).strip().upper()
     sg = sku_gender.strip().upper()
-    if sg == "KIDS":
-        return "KID" in rg or "BOY" in rg or "GIRL" in rg
+    if sg in ["KIDS", "BOYS", "GIRLS"] or any(k in sg for k in ["KID", "BOY", "GIRL"]):
+        return any(k in rg for k in ["KID", "BOY", "GIRL"])
     return sg in rg
 
 
@@ -2047,6 +2047,37 @@ def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
                 desc = row.get("DESCRIPTION")
                 if pd.notna(desc):
                     return str(desc).strip()
+    return None
+
+
+def get_updated_category(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                gender_col = None
+                for c in df.columns:
+                    if str(c).upper().strip() in ["GENDER", "590"]:
+                        gender_col = c
+                        break
+                if gender_col:
+                    g_val = row.get(gender_col)
+                    if pd.notna(g_val):
+                        g_str = str(g_val).strip().upper()
+                        if "WOMEN" in g_str:
+                            return "Women's"
+                        elif "MEN" in g_str:
+                            return "Men's"
+                        elif "BOY" in g_str:
+                            return "Boy's"
+                        elif "GIRL" in g_str:
+                            return "Girl's"
+                        elif "KID" in g_str:
+                            return "Kid's"
     return None
 
 
@@ -2413,19 +2444,35 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if excel_col:
                     excel_val = excel_row.get(excel_col)
                 else:
-                    gender = detect_gender_from_sku(tag.get("SKU"))
-                    if gender == "WOMENS":
-                        excel_val = "Women's"
-                    elif gender == "MENS":
-                        excel_val = "Men's"
-                    elif gender == "BOYS":
-                        excel_val = "Boy's"
-                    elif gender == "GIRLS":
-                        excel_val = "Girl's"
-                    elif gender == "KIDS":
-                        excel_val = "Kid's"
+                    g_cat = get_updated_category(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                    if g_cat:
+                        excel_val = g_cat
                     else:
-                        excel_val = None
+                        prod_text = (str(excel_row.get(desc_col) or "") + " " + str(excel_row.get("Product Description") or "")).upper()
+                        if "WOMEN" in prod_text:
+                            excel_val = "Women's"
+                        elif "MEN" in prod_text:
+                            excel_val = "Men's"
+                        elif "BOY" in prod_text:
+                            excel_val = "Boy's"
+                        elif "GIRL" in prod_text:
+                            excel_val = "Girl's"
+                        elif "KID" in prod_text:
+                            excel_val = "Kid's"
+                        else:
+                            gender = detect_gender_from_sku(tag.get("SKU"))
+                            if gender == "WOMENS":
+                                excel_val = "Women's"
+                            elif gender == "MENS":
+                                excel_val = "Men's"
+                            elif gender == "BOYS":
+                                excel_val = "Boy's"
+                            elif gender == "GIRLS":
+                                excel_val = "Girl's"
+                            elif gender == "KIDS":
+                                excel_val = "Kid's"
+                            else:
+                                excel_val = None
             elif field_name == "Size":
                 excel_sku = excel_row.get(sku_col) or pdf_sku_norm
                 if not excel_sku or str(excel_sku).strip().upper() == "NAN" or str(excel_sku).strip() == "":
