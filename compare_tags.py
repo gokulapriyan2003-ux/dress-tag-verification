@@ -2179,7 +2179,7 @@ def get_updated_category(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garm
                     g_val = row.get(gender_col)
                     if pd.notna(g_val):
                         g_str = str(g_val).strip().upper()
-                        if "WOMEN" in g_str:
+                        if "WOMEN" in g_str or "WOMN" in g_str or "WMN" in g_str:
                             return "Women's"
                         elif "MEN" in g_str:
                             return "Men's"
@@ -2392,6 +2392,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         gsheet_color_map = load_dynamic_color_map()
     desc_col = find_col(excel_df, "PRODUCT NAME", "DESCRIPTION", "PRODUCT")
     lot_col = find_col(excel_df, "LOT NO", "LOT", "STYLE", "STYLE CODE")
+    barcode_col = find_col(excel_df, "BARCODE", "BAR CODE", "EAN", "GTIN")
+    mrp_col = find_col(excel_df, "MRP")
+    total_mrp_col = find_col(excel_df, "TOTAL MRP")
+    size_col = find_col(excel_df, "SIZE")
+    color_col = find_col(excel_df, "COLOUR", "COLOR")
+    qty_col = find_col(excel_df, "PACK QTY", "NET QTY", "QTY", "TAG QTY")
+    category_col = find_col(excel_df, "CATEGORY", "GENDER")
+
     sku_col = find_col(
         excel_df,
         "SKU CODE", "SKU NUMBER", "SKU NO", "SKU",
