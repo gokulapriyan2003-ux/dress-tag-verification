@@ -1819,9 +1819,24 @@ def gender_matches(row_gender, sku_gender):
         return True
     rg = str(row_gender).strip().upper()
     sg = sku_gender.strip().upper()
+    
+    # Handle typos in Google Sheets
+    if "WOMN" in rg or "WMN" in rg or "WOMEN" in rg:
+        rg = "WOMENS"
+    if "WOMN" in sg or "WMN" in sg or "WOMEN" in sg:
+        sg = "WOMENS"
+        
+    if "MEN" in rg and rg != "WOMENS":
+        rg = "MENS"
+    if "MEN" in sg and sg != "WOMENS":
+        sg = "MENS"
+
+    if rg in ["MENS", "WOMENS"] and sg in ["MENS", "WOMENS"]:
+        return rg == sg
+
     if sg in ["KIDS", "BOYS", "GIRLS"] or any(k in sg for k in ["KID", "BOY", "GIRL"]):
         return any(k in rg for k in ["KID", "BOY", "GIRL"])
-    return sg in rg
+    return sg == rg
 
 
 def match_style_code(pdf_style_base, gs_style_base, tag_type="Standard Garment / Dress Tags"):
@@ -1973,7 +1988,12 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
 
 def clean_prefix(prefix):
     p = str(prefix).strip().upper()
-    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G", "I"}
+    two_letter = ("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+    for tl in two_letter:
+        if p.startswith(tl):
+            p = p[len(tl):]
+            break
+    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G", "I", "J", "V", "D"}
     while len(p) > 0 and p[0] in category_letters:
         p = p[1:]
     return p
@@ -2005,6 +2025,31 @@ def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment /
                 mrp_val = row.get("MRP")
                 if pd.notna(mrp_val):
                     return mrp_val
+    return None
+
+
+def get_updated_total_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                box_mrp = row.get("MRP.1")
+                if pd.notna(box_mrp) and str(box_mrp).strip() and str(box_mrp).strip().upper() != "NAN":
+                    try:
+                        return float(box_mrp)
+                    except (ValueError, TypeError):
+                        pass
+                unit_mrp = row.get("MRP")
+                pcs = row.get("PCS PER BOXES")
+                if pd.notna(unit_mrp) and pd.notna(pcs):
+                    try:
+                        return float(unit_mrp) * float(pcs)
+                    except (ValueError, TypeError):
+                        pass
     return None
 
 
@@ -2422,24 +2467,29 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 pdf_val = tag.get("Total MRP")
                 if pdf_val is None:
                     continue
-                excel_val = excel_row.get(total_mrp_col) if (total_mrp_col and pd.notna(excel_row.get(total_mrp_col)) and str(excel_row.get(total_mrp_col)).strip() != "" and str(excel_row.get(total_mrp_col)).strip().upper() != "NAN") else None
-                if excel_val is None:
-                    single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
-                    if not single_mrp:
-                        single_mrp = excel_row.get(mrp_col) if mrp_col else None
-                    if tag_type == "B2B Box Sticker tag file":
-                        p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
-                    elif tag_type == "B2B Bundle Sticker tag file":
-                        p_qty = pack_qty_info or norm_fn(excel_row.get(qty_col)) or 5.0
-                    else:
-                        p_qty = norm_fn(tag.get("Qty") or tag.get("Net Quantity")) or 1.0
-                    if single_mrp and p_qty:
-                        try:
-                            excel_val = float(single_mrp) * float(p_qty)
-                        except (ValueError, TypeError):
+                # 1. Fetch authoritative Total MRP directly from Google Sheet (MRP.1 / PCS PER BOXES)
+                g_total_mrp = get_updated_total_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                if g_total_mrp is not None:
+                    excel_val = g_total_mrp
+                else:
+                    excel_val = excel_row.get(total_mrp_col) if (total_mrp_col and pd.notna(excel_row.get(total_mrp_col)) and str(excel_row.get(total_mrp_col)).strip() != "" and str(excel_row.get(total_mrp_col)).strip().upper() != "NAN") else None
+                    if excel_val is None:
+                        single_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                        if not single_mrp:
+                            single_mrp = excel_row.get(mrp_col) if mrp_col else None
+                        if tag_type == "B2B Box Sticker tag file":
+                            p_qty = norm_fn(tag.get("Net Quantity")) or pack_qty_info or 8.0
+                        elif tag_type == "B2B Bundle Sticker tag file":
+                            p_qty = pack_qty_info or norm_fn(excel_row.get(qty_col)) or 5.0
+                        else:
+                            p_qty = norm_fn(tag.get("Qty") or tag.get("Net Quantity")) or 1.0
+                        if single_mrp and p_qty:
+                            try:
+                                excel_val = float(single_mrp) * float(p_qty)
+                            except (ValueError, TypeError):
+                                excel_val = None
+                        else:
                             excel_val = None
-                    else:
-                        excel_val = None
             elif field_name == "Fit":
                 pdf_val = tag.get("Fit")
                 g_fit = get_updated_fit(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
@@ -2607,7 +2657,12 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 
                 def clean_lot_base(base):
                     b = str(base).strip().upper()
-                    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G", "I"}
+                    two_letter = ("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+                    for tl in two_letter:
+                        if b.startswith(tl):
+                            b = b[len(tl):]
+                            break
+                    category_letters = {"O", "S", "P", "T", "M", "W", "K", "B", "G", "I", "J", "V", "D"}
                     while len(b) > 0 and b[0] in category_letters:
                         b = b[1:]
                     return b
