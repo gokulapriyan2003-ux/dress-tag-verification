@@ -318,6 +318,21 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 2. EXCEL MASTER SHEET EXTRACTION
 # ---------------------------------------------------------------------------
+def is_likely_data_row(row):
+    if not row:
+        return False
+    for c in row:
+        if c is None:
+            continue
+        s = str(c).strip()
+        if len(s) in [12, 13, 14] and s.startswith("890") and s.isdigit():
+            return True
+        if 8 <= len(s) <= 20 and any(s.startswith(p) for p in [
+            "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD"
+        ]):
+            return True
+    return False
+
 
 def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame:
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
@@ -343,11 +358,13 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
     best_header_idx = None
     best_ws = None
 
-    # Pass 1: Look for a sheet and row containing "SKU"
+    # Pass 1: Look for a header row containing "SKU" (skipping data rows)
     for s_name in candidate_sheets:
         ws = wb[s_name]
         preview_rows = list(ws.iter_rows(values_only=True, max_row=35))
         for i, row in enumerate(preview_rows):
+            if is_likely_data_row(row):
+                continue
             cells = [str(c).strip().upper() if c is not None else "" for c in row]
             if any("SKU" in c for c in cells):
                 best_sheet = s_name
@@ -357,12 +374,14 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
         if best_sheet:
             break
 
-    # Pass 2: Look for alternative SKU / Inventory keywords (ITEM CODE, BARCODE, GTIN, STYLE, etc.)
+    # Pass 2: Look for alternative SKU / Inventory keywords (skipping data rows)
     if best_sheet is None:
         for s_name in candidate_sheets:
             ws = wb[s_name]
             preview_rows = list(ws.iter_rows(values_only=True, max_row=35))
             for i, row in enumerate(preview_rows):
+                if is_likely_data_row(row):
+                    continue
                 cells = [str(c).strip().upper() if c is not None else "" for c in row]
                 matches = sum(1 for c in cells if any(kw in c for kw in header_keywords))
                 if matches >= 2:
@@ -373,7 +392,20 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
             if best_sheet:
                 break
 
-    # Pass 3: Fallback to the first sheet with at least 3 non-empty columns in any row
+    is_headerless = False
+    # Pass 3: If no header found, check if sheet starts directly with data rows (headerless file)
+    if best_sheet is None:
+        for s_name in candidate_sheets:
+            ws = wb[s_name]
+            preview_rows = list(ws.iter_rows(values_only=True, max_row=5))
+            if any(is_likely_data_row(r) for r in preview_rows):
+                best_sheet = s_name
+                best_ws = ws
+                best_header_idx = 0
+                is_headerless = True
+                break
+
+    # Pass 4: Fallback to the first sheet with at least 3 non-empty columns
     if best_sheet is None:
         for s_name in candidate_sheets:
             ws = wb[s_name]
@@ -393,30 +425,39 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
         raise ValueError(f"Could not find any recognizable header row or table data in the Excel workbook. Available sheets: [{available}]. Please specify the sheet name or check your file format.")
 
     all_rows = list(best_ws.iter_rows(values_only=True))
-    header_raw = all_rows[best_header_idx]
-    
-    clean_header = []
-    seen = {}
-    for idx, c in enumerate(header_raw):
-        col_name = str(c).strip() if c is not None else ""
-        if not col_name:
-            col_name = f"Column_{idx+1}"
-        if col_name in seen:
-            seen[col_name] += 1
-            col_name = f"{col_name}_{seen[col_name]}"
-        else:
-            seen[col_name] = 0
-        clean_header.append(col_name)
 
-    data_rows = []
-    for row in all_rows[best_header_idx + 1:]:
-        if not row or all(c is None or str(c).strip() == "" for c in row):
-            continue
-        first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
-        if first_cell == "TOTAL":
-            break
-        padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
-        data_rows.append(padded_row)
+    if is_headerless or is_likely_data_row(all_rows[best_header_idx]):
+        standard_cols = ["Barcode", "SKU", "Product Name", "Product Description", "Measurement Unit", "Net Weight", "Target Market", "MRP Activation Date", "MRP Location", "MRP"]
+        n_cols = max(len(r) for r in all_rows[:10]) if all_rows else 10
+        if n_cols <= len(standard_cols):
+            clean_header = standard_cols[:n_cols]
+        else:
+            clean_header = standard_cols + [f"Column_{j+1}" for j in range(len(standard_cols), n_cols)]
+        data_rows = [list(r[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(r)) for r in all_rows if any(c is not None and str(c).strip() != "" for c in r)]
+    else:
+        header_raw = all_rows[best_header_idx]
+        clean_header = []
+        seen = {}
+        for idx, c in enumerate(header_raw):
+            col_name = str(c).strip() if c is not None else ""
+            if not col_name:
+                col_name = f"Column_{idx+1}"
+            if col_name in seen:
+                seen[col_name] += 1
+                col_name = f"{col_name}_{seen[col_name]}"
+            else:
+                seen[col_name] = 0
+            clean_header.append(col_name)
+
+        data_rows = []
+        for row in all_rows[best_header_idx + 1:]:
+            if not row or all(c is None or str(c).strip() == "" for c in row):
+                continue
+            first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
+            if first_cell == "TOTAL":
+                break
+            padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
+            data_rows.append(padded_row)
 
     df = pd.DataFrame(data_rows, columns=clean_header)
     return df
@@ -2406,10 +2447,60 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         "ITEM CODE", "ITEM_CODE", "ITEM NO", "ITEM NUMBER", "ITEM",
         "PRODUCT CODE", "MATERIAL NO", "MATERIAL", "ARTICLE NO", "ARTICLE", "CODE"
     )
+    # Dynamic fallback 1: If sku_col not found by header name, inspect data content
+    if sku_col is None:
+        for col in excel_df.columns:
+            sample = [str(col)] + excel_df[col].dropna().astype(str).head(30).tolist()
+            sku_matches = sum(1 for v in sample if 8 <= len(v.strip()) <= 20 and any(c.isalpha() for c in v) and any(c.isdigit() for c in v))
+            if len(sample) > 0 and sku_matches / len(sample) >= 0.5:
+                sku_col = col
+                break
+
+    # Dynamic fallback 2: Check for barcode/style
     if sku_col is None and barcode_col is not None:
         sku_col = barcode_col
     if sku_col is None:
         sku_col = find_col(excel_df, "STYLE NO", "STYLE CODE", "STYLE")
+
+    # Dynamic fallback 3: Inspect content for barcode if barcode_col is None
+    if barcode_col is None:
+        for col in excel_df.columns:
+            if col == sku_col:
+                continue
+            sample = [str(col)] + excel_df[col].dropna().astype(str).head(30).tolist()
+            barcode_matches = sum(1 for v in sample if (len(v.strip()) in [12, 13, 14]) and v.strip().isdigit())
+            if len(sample) > 0 and barcode_matches / len(sample) >= 0.5:
+                barcode_col = col
+                break
+
+    # Dynamic fallback 4: Inspect content for description if desc_col is None
+    if desc_col is None:
+        for col in excel_df.columns:
+            if col in [sku_col, barcode_col]:
+                continue
+            sample = [str(col)] + excel_df[col].dropna().astype(str).head(30).tolist()
+            desc_matches = sum(1 for v in sample if len(v.split()) >= 3 and any(w in v.upper() for w in ["MENS", "WOMENS", "KIDS", "BOYS", "FIT", "NECK", "JACKET", "TSHIRT", "PANT", "SHORTS"]))
+            if len(sample) > 0 and desc_matches / len(sample) >= 0.3:
+                desc_col = col
+                break
+
+    # Dynamic fallback 5: Inspect content for MRP if mrp_col is None
+    if mrp_col is None:
+        for col in reversed(list(excel_df.columns)):
+            if col in [sku_col, barcode_col, desc_col]:
+                continue
+            sample = [str(col)] + excel_df[col].dropna().head(30).tolist()
+            mrp_matches = 0
+            for v in sample:
+                try:
+                    num = float(v)
+                    if 100 <= num <= 15000:
+                        mrp_matches += 1
+                except (ValueError, TypeError):
+                    pass
+            if len(sample) > 0 and mrp_matches / len(sample) >= 0.5:
+                mrp_col = col
+                break
 
     if sku_col is None:
         cols_preview = ", ".join(excel_df.columns[:10])
