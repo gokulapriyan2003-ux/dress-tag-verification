@@ -321,38 +321,104 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
 
 def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame:
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
-    sheet_name = sheet_name or wb.sheetnames[0]
-    ws = wb[sheet_name]
+    
+    # If specific sheet_name requested, try that first; else check all sheets
+    if sheet_name and sheet_name in wb.sheetnames:
+        candidate_sheets = [sheet_name]
+    else:
+        # Prefer sheets whose names suggest master data: 'MRP', 'MASTER', 'DATA', 'GS1', 'SHEET1'
+        sorted_sheets = sorted(
+            wb.sheetnames,
+            key=lambda s: 0 if any(k in s.upper() for k in ["MRP", "MASTER", "GS1", "DATA", "PRODUCT", "SKU"]) else (1 if "SHEET1" in s.upper() else 2)
+        )
+        candidate_sheets = sorted_sheets
 
-    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    header_keywords = [
+        "SKU", "ITEM CODE", "ITEM_CODE", "ITEM NO", "ITEM NUMBER", "ITEM",
+        "PRODUCT CODE", "MATERIAL", "ARTICLE", "GTIN", "BARCODE", "BAR CODE",
+        "STYLE", "PRODUCT NAME", "DESCRIPTION", "MRP"
+    ]
 
-    # Find the header row: the row that contains something like "SKU"
-    header_idx = None
-    for i, row in enumerate(rows):
-        cells = [str(c).strip().upper() if c else "" for c in row]
-        if any("SKU" in c for c in cells):
-            header_idx = i
+    best_sheet = None
+    best_header_idx = None
+    best_ws = None
+
+    # Pass 1: Look for a sheet and row containing "SKU"
+    for s_name in candidate_sheets:
+        ws = wb[s_name]
+        preview_rows = list(ws.iter_rows(values_only=True, max_row=35))
+        for i, row in enumerate(preview_rows):
+            cells = [str(c).strip().upper() if c is not None else "" for c in row]
+            if any("SKU" in c for c in cells):
+                best_sheet = s_name
+                best_header_idx = i
+                best_ws = ws
+                break
+        if best_sheet:
             break
 
-    if header_idx is None:
-        raise ValueError("Could not find a header row containing 'SKU' in the sheet.")
+    # Pass 2: Look for alternative SKU / Inventory keywords (ITEM CODE, BARCODE, GTIN, STYLE, etc.)
+    if best_sheet is None:
+        for s_name in candidate_sheets:
+            ws = wb[s_name]
+            preview_rows = list(ws.iter_rows(values_only=True, max_row=35))
+            for i, row in enumerate(preview_rows):
+                cells = [str(c).strip().upper() if c is not None else "" for c in row]
+                matches = sum(1 for c in cells if any(kw in c for kw in header_keywords))
+                if matches >= 2:
+                    best_sheet = s_name
+                    best_header_idx = i
+                    best_ws = ws
+                    break
+            if best_sheet:
+                break
 
-    header = [str(c).strip() if c else "" for c in rows[header_idx]]
+    # Pass 3: Fallback to the first sheet with at least 3 non-empty columns in any row
+    if best_sheet is None:
+        for s_name in candidate_sheets:
+            ws = wb[s_name]
+            preview_rows = list(ws.iter_rows(values_only=True, max_row=35))
+            for i, row in enumerate(preview_rows):
+                non_empty = [c for c in row if c is not None and str(c).strip()]
+                if len(non_empty) >= 3:
+                    best_sheet = s_name
+                    best_header_idx = i
+                    best_ws = ws
+                    break
+            if best_sheet:
+                break
+
+    if best_ws is None or best_header_idx is None:
+        available = ", ".join(wb.sheetnames)
+        raise ValueError(f"Could not find any recognizable header row or table data in the Excel workbook. Available sheets: [{available}]. Please specify the sheet name or check your file format.")
+
+    all_rows = list(best_ws.iter_rows(values_only=True))
+    header_raw = all_rows[best_header_idx]
+    
+    clean_header = []
+    seen = {}
+    for idx, c in enumerate(header_raw):
+        col_name = str(c).strip() if c is not None else ""
+        if not col_name:
+            col_name = f"Column_{idx+1}"
+        if col_name in seen:
+            seen[col_name] += 1
+            col_name = f"{col_name}_{seen[col_name]}"
+        else:
+            seen[col_name] = 0
+        clean_header.append(col_name)
+
     data_rows = []
-    for row in rows[header_idx + 1:]:
-        # stop at a blank row or a "TOTAL" row
-        first_cell = str(row[0]).strip().upper() if row[0] else ""
-        if first_cell == "" and all(c is None for c in row):
+    for row in all_rows[best_header_idx + 1:]:
+        if not row or all(c is None or str(c).strip() == "" for c in row):
             continue
+        first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
         if first_cell == "TOTAL":
             break
-        if row[0] is None:
-            continue
-        data_rows.append(row)
+        padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
+        data_rows.append(padded_row)
 
-    df = pd.DataFrame(data_rows, columns=header[:len(data_rows[0])] if data_rows else header)
-    # Trim to only named columns
-    df = df[[c for c in header if c]]
+    df = pd.DataFrame(data_rows, columns=clean_header)
     return df
 
 
@@ -2326,17 +2392,20 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         gsheet_color_map = load_dynamic_color_map()
     desc_col = find_col(excel_df, "PRODUCT NAME", "DESCRIPTION", "PRODUCT")
     lot_col = find_col(excel_df, "LOT NO", "LOT", "STYLE", "STYLE CODE")
-    sku_col = find_col(excel_df, "SKU CODE", "SKU")
-    barcode_col = find_col(excel_df, "BARCODE", "BAR CODE", "EAN", "GTIN")
-    mrp_col = find_col(excel_df, "MRP")
-    total_mrp_col = find_col(excel_df, "TOTAL MRP")
-    size_col = find_col(excel_df, "SIZE")
-    color_col = find_col(excel_df, "COLOUR", "COLOR")
-    qty_col = find_col(excel_df, "PACK QTY", "NET QTY", "QTY", "TAG QTY")
-    category_col = find_col(excel_df, "CATEGORY", "GENDER")
+    sku_col = find_col(
+        excel_df,
+        "SKU CODE", "SKU NUMBER", "SKU NO", "SKU",
+        "ITEM CODE", "ITEM_CODE", "ITEM NO", "ITEM NUMBER", "ITEM",
+        "PRODUCT CODE", "MATERIAL NO", "MATERIAL", "ARTICLE NO", "ARTICLE", "CODE"
+    )
+    if sku_col is None and barcode_col is not None:
+        sku_col = barcode_col
+    if sku_col is None:
+        sku_col = find_col(excel_df, "STYLE NO", "STYLE CODE", "STYLE")
 
     if sku_col is None:
-        raise ValueError("Could not find an SKU column in the Excel sheet.")
+        cols_preview = ", ".join(excel_df.columns[:10])
+        raise ValueError(f"Could not find an SKU or Identifier column in the Excel sheet. Available columns: [{cols_preview}]")
 
     excel_idx_sku = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
     excel_idx_barcode = {}
