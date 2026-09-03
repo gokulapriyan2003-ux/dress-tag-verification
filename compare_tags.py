@@ -27,7 +27,7 @@ import urllib.request
 # (N = number of tags side-by-side in that row of the sheet). We split each
 # line on the label text itself to recover the N individual values in order.
 CANONICAL_LABELS = {
-    "Style:": ["Style:", "STYLE:", "Lot No:", "LOT NO:", "STYLE CODE:", "Style Code:", "LOT NO :", "LOT NO  :"],
+    "Style:": ["Style:", "STYLE:", "Lot No:", "LOT NO:", "STYLE CODE:", "Style Code:", "LOT NO :", "LOT NO  :", "LOT:", "LOT :"],
     "Product:": ["Product:", "PRODUCT:", "Product Name:", "PRODUCT NAME:"],
     "Fit:": ["Fit:", "FIT:"],
     "Color:": ["Color:", "COLOR:", "Colour:", "COLOUR:"],
@@ -37,7 +37,7 @@ CANONICAL_LABELS = {
     "HSN Code:": ["HSN Code:", "HSN CODE:"],
     "SKU Code:": ["SKU Code:", "SKU CODE:", "SKU:"],
     "SIZE :": ["SIZE :", "SIZE:", "Size:", "Size :"],
-    "MRP:": ["MRP:", "MRP :"],
+    "MRP:": ["MRP:", "MRP :", "M.R.P:", "M.R.P :", "M.R.P. :"],
     "Qty:": ["Qty:", "QTY:", "Qty :", "QTY :"],
 }
 
@@ -50,6 +50,18 @@ for canonical, variations in CANONICAL_LABELS.items():
 
 BARCODE_RE = re.compile(r"^\d{8,14}$")          # standalone barcode line
 CM_RE = re.compile(r"^\(\d+(\.\d+)?CM\)$")       # e.g. (71.12CM)
+
+
+def extract_barcodes_from_line(line: str):
+    found = []
+    spaced = re.findall(r"\b(\d)\s+(\d{6})\s+(\d{6})\b", line)
+    if spaced:
+        for m in spaced:
+            found.append(f"{m[0]}{m[1]}{m[2]}")
+    for t in line.split():
+        if BARCODE_RE.match(t):
+            found.append(t)
+    return found
 
 
 def split_repeated_label(line: str, label: str):
@@ -163,15 +175,11 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
             
             # Check if this page contains tags (must have barcode or MRP)
-            has_tags = False
-            for line in raw_lines:
-                tokens = line.split()
-                if any(BARCODE_RE.match(t) for t in tokens):
-                    has_tags = True
-                    break
-                if "MRP" in line.upper():
-                    has_tags = True
-                    break
+            has_tags = any(
+                any(k in l.upper() for k in ["MRP", "M.R.P", "SKU CODE", "SKU:"]) or
+                len(extract_barcodes_from_line(l)) > 0
+                for l in raw_lines
+            )
             
             if not has_tags:
                 continue
@@ -179,6 +187,12 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             for idx_line, line in enumerate(raw_lines):
                 if page_num == 0 and idx_line < 7:
                     continue
+
+                b_list = extract_barcodes_from_line(line)
+                if b_list:
+                    barcodes.extend(b_list)
+                    continue
+
                 # 1. Check for MRP line containing quantities
                 mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE))
                 if mrp_matches:
@@ -207,11 +221,11 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                         last_end = end
                 
                 if filtered_matches:
-                    has_lot_no = any("LOT NO" in lbl.upper() for _, _, lbl in filtered_matches)
+                    has_lot_no = any(LABEL_TO_CANONICAL[lbl] == "Style:" for _, _, lbl in filtered_matches)
                     if has_lot_no and idx_line > 0:
                         if not (page_num == 0 and idx_line < 7):
                             prev_line = raw_lines[idx_line - 1]
-                            lots_count = sum(1 for _, _, lbl in filtered_matches if "LOT NO" in lbl.upper())
+                            lots_count = sum(1 for _, _, lbl in filtered_matches if LABEL_TO_CANONICAL[lbl] == "Style:")
                             if lots_count > 0:
                                 if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
                                     parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
@@ -235,12 +249,8 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                             field_lists[canonical].append(val_str)
                     continue
 
-                # barcode / cm-size lines contain several space-separated tokens
+                # cm-size lines contain several space-separated tokens
                 tokens = line.split()
-                found_barcodes = [t for t in tokens if BARCODE_RE.match(t)]
-                if found_barcodes:
-                    barcodes.extend(found_barcodes)
-                    
                 found_cm = [t for t in tokens if CM_RE.match(t)]
                 if found_cm:
                     cm_sizes.extend(found_cm)
@@ -1962,12 +1972,21 @@ def gender_matches(row_gender, sku_gender):
 
 def strip_standard_sku_prefix(style_str):
     s = str(style_str).strip().upper()
-    two_letter = ("MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
-    for tl in two_letter:
+    prefixes = ("MCS", "WCS", "MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+    for tl in prefixes:
         if s.startswith(tl):
             s = s[len(tl):]
             break
     return s
+
+
+def split_composite_style(style_str):
+    s = str(style_str).strip().upper() if style_str else ""
+    s = strip_standard_sku_prefix(s)
+    m = re.match(r"^([A-Z]+\d+)([A-Z]+\d+)$", s)
+    if m:
+        return m.group(1), m.group(2)
+    return None
 
 
 def match_style_code(pdf_style_base, gs_style_base, tag_type="Standard Garment / Dress Tags"):
@@ -2148,8 +2167,8 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
 
 def clean_prefix(prefix):
     p = str(prefix).strip().upper()
-    two_letter = ("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
-    for tl in two_letter:
+    prefixes = ("MCS", "WCS", "MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+    for tl in prefixes:
         if p.startswith(tl):
             p = p[len(tl):]
             break
@@ -2169,6 +2188,19 @@ def get_updated_fit(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment /
 
 
 def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    comp = split_composite_style(pdf_style or pdf_sku)
+    if comp:
+        r1 = find_best_gsheet_row(gsheet_dfs, comp[0], pdf_sku, tag_type)
+        r2 = find_best_gsheet_row(gsheet_dfs, comp[1], pdf_sku, tag_type)
+        if r1 is not None and r2 is not None:
+            m1 = r1.get("MRP")
+            m2 = r2.get("MRP")
+            if pd.notna(m1) and pd.notna(m2):
+                try:
+                    return float(m1) + float(m2)
+                except (ValueError, TypeError):
+                    pass
+
     row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
     if row is not None:
         mrp_val = row.get("MRP")
@@ -2212,6 +2244,14 @@ def get_updated_pcs_per_box(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
 
 
 def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    comp = split_composite_style(pdf_style or pdf_sku)
+    if comp:
+        s_clean = strip_standard_sku_prefix(pdf_style or pdf_sku)
+        m = re.match(r"^([A-Z]+\d+[A-Z]+\d+)", s_clean)
+        if m:
+            return m.group(1)
+        return f"{comp[0]}{comp[1]}"
+
     row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
     if row is not None:
         col_name = next((c for c in row.index if str(c).strip() == ","), None)
@@ -2234,6 +2274,16 @@ def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garmen
 
 
 def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    comp = split_composite_style(pdf_style or pdf_sku)
+    if comp:
+        if gsheet_dfs and "New MRP 26-27" in gsheet_dfs:
+            df_new = gsheet_dfs["New MRP 26-27"]
+            for _, r in df_new.iterrows():
+                desc_str = str(r.get("DESCRIPTION", "")).strip().upper()
+                if "TRACKSUIT" in desc_str or ("HI-NECK" in desc_str and "TRACKPANT" in desc_str):
+                    return str(r.get("DESCRIPTION")).strip()
+        return "MENS BASIC TRACKSUIT"
+
     row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
     if row is not None:
         desc = row.get("DESCRIPTION")
@@ -2243,6 +2293,14 @@ def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard G
 
 
 def get_updated_category(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    comp = split_composite_style(pdf_style or pdf_sku)
+    if comp:
+        r1 = find_best_gsheet_row(gsheet_dfs, comp[0], pdf_sku, tag_type)
+        if r1 is not None:
+            g_val = r1.get("GENDER")
+            if pd.notna(g_val):
+                return "Men's" if "MEN" in str(g_val).upper() else str(g_val).strip()
+
     row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
     if row is not None:
         gender_col = next((c for c in row.index if str(c).upper().strip() in ["GENDER", "590"]), None)
@@ -2286,7 +2344,9 @@ def extract_sku_details_with_batch(sku_str):
         color = left[-3:]
         rest = left[:-3]
         
-        if rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
+        if rest.startswith(("MCS", "WCS")):
+            style = rest[3:]
+        elif rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
             style = rest[2:]
         elif rest.startswith(("M", "W", "K", "B", "G")):
             style = rest[1:]
@@ -2320,7 +2380,9 @@ def extract_sku_details_with_batch(sku_str):
         if len(left) >= 5:
             color = left[-3:]
             rest = left[:-3]
-            if rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
+            if rest.startswith(("MCS", "WCS")):
+                style = rest[3:]
+            elif rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
                 style = rest[2:]
             elif rest.startswith(("M", "W", "K", "B", "G")):
                 style = rest[1:]
@@ -2570,6 +2632,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Lot No (GS1 Master)", lot_col, normalize_lot),
             ("Qty", qty_col, normalize_number),
             ("Total MRP", None, normalize_number),
+            ("MRP", mrp_col, normalize_number),
             ("SKU", sku_col, normalize_sku),
             ("EAN", barcode_col, normalize_barcode),
             ("Size", size_col, normalize_size),
@@ -2687,7 +2750,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 if tag_type in ["B2B Box Sticker tag file", "B2B Bundle Sticker tag file"]:
                     g_pcs = get_updated_pcs_per_box(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
-                    if g_pcs is not None:
+                    if pdf_val and any(k in str(pdf_val).upper() for k in ["SET", "UNIT"]):
+                        excel_val = 1.0
+                    elif g_pcs is not None:
                         excel_val = g_pcs
                     else:
                         excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
@@ -2695,6 +2760,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
             elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
+                if pdf_val is None:
+                    continue
                 g_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                 excel_val = g_mrp if g_mrp else (excel_row.get(mrp_col) if mrp_col else None)
             elif field_name == "Total MRP":
