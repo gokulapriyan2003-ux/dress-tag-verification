@@ -479,6 +479,20 @@ def normalize_lot(x):
     return str(x).strip().upper()
 
 
+def normalize_barcode(x):
+    if x is None or pd.isna(x):
+        return ""
+    s = str(x).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    try:
+        if "E+" in s.upper() or "E-" in s.upper():
+            s = str(int(float(s)))
+    except Exception:
+        pass
+    return "".join(c for c in s if c.isdigit())
+
+
 def normalize_text(x):
     if x is None:
         return ""
@@ -2507,12 +2521,20 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         raise ValueError(f"Could not find an SKU or Identifier column in the Excel sheet. Available columns: [{cols_preview}]")
 
     excel_idx_sku = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
+    
     excel_idx_barcode = {}
-    if barcode_col:
+    candidate_barcode_cols = [barcode_col] if barcode_col else []
+    for c in excel_df.columns:
+        if c not in candidate_barcode_cols and any(k in str(c).upper() for k in ["BARCODE", "GTIN", "EAN", "BAR CODE"]):
+            candidate_barcode_cols.append(c)
+    if not candidate_barcode_cols and len(excel_df.columns) > 0:
+        candidate_barcode_cols.append(excel_df.columns[0])
+
+    for b_col in candidate_barcode_cols:
         for _, row in excel_df.iterrows():
-            bar_val = row.get(barcode_col)
-            if pd.notna(bar_val) and str(bar_val).strip():
-                excel_idx_barcode[str(bar_val).strip()] = row
+            b_norm = normalize_barcode(row.get(b_col))
+            if len(b_norm) >= 8 and b_norm not in excel_idx_barcode:
+                excel_idx_barcode[b_norm] = row
 
     if tag_type == "B2B Bundle Sticker tag file":
         field_map = [
@@ -2522,7 +2544,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Qty", qty_col, normalize_number),
             ("Total MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
-            ("EAN", barcode_col, normalize_text),
+            ("EAN", barcode_col, normalize_barcode),
             ("Size", size_col, normalize_size),
         ]
     elif tag_type == "B2B Box Sticker tag file":
@@ -2533,7 +2555,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Qty", qty_col, normalize_number),
             ("Total MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
-            ("EAN", barcode_col, normalize_text),
+            ("EAN", barcode_col, normalize_barcode),
             ("Size", size_col, normalize_size),
         ]
     else:
@@ -2543,7 +2565,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             ("Category", category_col, normalize_category_value),
             ("MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
-            ("EAN", barcode_col, normalize_text),
+            ("EAN", barcode_col, normalize_barcode),
             ("Size", size_col, normalize_size),
             ("Color", color_col, normalize_color),
             ("Qty", qty_col, normalize_number),
@@ -2556,14 +2578,31 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
     for _, tag in pdf_df.iterrows():
         pdf_sku_norm = normalize_sku(tag["SKU"])
-        pdf_barcode = str(tag.get("EAN") or tag.get("Barcode") or "").strip()
+        pdf_barcode_norm = normalize_barcode(tag.get("EAN") or tag.get("Barcode"))
         
         # 1. Lookup by SKU first
         excel_row = excel_idx_sku.get(pdf_sku_norm)
         
         # 2. Fallback to lookup by Barcode/GTIN if SKU is not found
-        if excel_row is None and pdf_barcode:
-            excel_row = excel_idx_barcode.get(pdf_barcode)
+        if excel_row is None and pdf_barcode_norm:
+            excel_row = excel_idx_barcode.get(pdf_barcode_norm)
+
+        # 3. Fallback: match by SKU prefix / batch variant (e.g. MTOR40BLMMED vs MTOR40BLMMED010)
+        if excel_row is None:
+            for ex_sku, r in excel_idx_sku.items():
+                if ex_sku.startswith(pdf_sku_norm) or pdf_sku_norm.startswith(ex_sku):
+                    excel_row = r
+                    break
+
+        # 4. Fallback: match by Style + Color + Size
+        if excel_row is None:
+            tag_style, tag_color, tag_size = extract_sku_details(pdf_sku_norm)
+            if tag_style and tag_color and tag_size:
+                for ex_sku, r in excel_idx_sku.items():
+                    es, ec, ez = extract_sku_details(ex_sku)
+                    if es == tag_style and ec == tag_color and ez == tag_size:
+                        excel_row = r
+                        break
 
         is_simulated = False
         if excel_row is None:
@@ -2745,7 +2784,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     excel_val = pdf_sku_norm
             elif field_name == "EAN":
                 pdf_val = tag.get("EAN") or tag.get("Barcode")
-                excel_val = excel_row.get(barcode_col) if barcode_col else None
+                pdf_b_norm = normalize_barcode(pdf_val)
+                excel_val = excel_row.get(barcode_col) if (excel_row is not None and barcode_col) else None
+                excel_b_norm = normalize_barcode(excel_val)
+
+                # If missing or mismatch, directly check if PDF barcode exists anywhere in the Master Excel
+                if not excel_b_norm and pdf_b_norm and pdf_b_norm in excel_idx_barcode:
+                    found_row = excel_idx_barcode[pdf_b_norm]
+                    excel_val = found_row.get(barcode_col) or pdf_val
+                    excel_b_norm = pdf_b_norm
             else:
                 if excel_col is None:
                     continue
@@ -2866,11 +2913,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     ))
                 )
                 status = "✅ Match" if is_match else "❌ Mismatch"
-            else:
-                if field_name == "EAN" and is_simulated:
+            elif field_name == "EAN":
+                if pdf_norm and excel_norm and pdf_norm == excel_norm:
+                    status = "✅ Match"
+                elif not excel_norm:
                     status = "❌ Not found in Excel"
                 else:
-                    status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
+                    status = "❌ Mismatch"
+            else:
+                status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
             report_rows.append({
                 "SKU": tag["SKU"],
                 "Field": field_name,
