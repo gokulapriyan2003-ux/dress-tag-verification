@@ -2073,70 +2073,77 @@ def append_sku_batch_to_style(pdf_style, pdf_sku):
     return style_clean
 
 
-def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garment / Dress Tags"):
-    style_clean = str(pdf_style).strip().upper()
-    
-    # Extract parts
+def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+
+    style_clean = str(pdf_style).strip().upper() if pdf_style else ""
     p_parts = style_clean.split("/")
     p_style_base = p_parts[0].strip()
     p_batch = p_parts[1].strip() if len(p_parts) > 1 else ""
-    
-    # Check if SKU has suffix
     if not p_batch and pdf_sku:
         res = extract_sku_details_with_batch(pdf_sku)
         if res and len(res) == 4:
             p_batch = res[3]
-                        
-    sku_gender = detect_gender_from_sku(pdf_sku)
-    
-    gender_col = None
-    for c in df.columns:
-        if str(c).upper().strip() in ["GENDER", "590"]:
-            gender_col = c
-            break
 
+    sku_gender = detect_gender_from_sku(pdf_sku)
     p_clean_base = strip_standard_sku_prefix(p_style_base)
 
-    # Pass 1: EXACT Style Code Match with batch match
-    for _, row in df.iterrows():
-        gs_style = str(row.get("STYLE NO", "")).strip().upper()
-        gs_batch = str(row.get("BATCH", "")).strip().upper()
-        if gs_style and gs_style != "NAN":
-            if strip_standard_sku_prefix(gs_style) == p_clean_base:
-                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                    if match_batch_code(p_batch, gs_batch):
+    sheet_order = ["New MRP 26-27", "DT FINAL MRP"]
+    sheets = [(s, gsheet_dfs[s]) for s in sheet_order if s in gsheet_dfs and gsheet_dfs[s] is not None]
+
+    # Phase 1: EXACT Style Code and EXACT Batch across all sheets (e.g. OR40/40)
+    if p_batch:
+        for s_name, df in sheets:
+            gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
+            for _, row in df.iterrows():
+                gs_style = str(row.get("STYLE NO", "")).strip().upper()
+                gs_batch = str(row.get("BATCH", "")).strip().upper()
+                if gs_style and gs_style != "NAN":
+                    if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                            if match_batch_code(p_batch, gs_batch):
+                                return row
+
+    # Phase 2: EXACT Style Code Match with fallback batch across all sheets
+    for s_name, df in sheets:
+        gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
+        for _, row in df.iterrows():
+            gs_style = str(row.get("STYLE NO", "")).strip().upper()
+            if gs_style and gs_style != "NAN":
+                if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
                         return row
 
-    # Pass 2: EXACT Style Code Match with fallback batch
-    for _, row in df.iterrows():
-        gs_style = str(row.get("STYLE NO", "")).strip().upper()
-        gs_batch = str(row.get("BATCH", "")).strip().upper()
-        if gs_style and gs_style != "NAN":
-            if strip_standard_sku_prefix(gs_style) == p_clean_base:
-                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                    return row
+    # Phase 3: Fuzzy prefix match with batch across all sheets
+    if p_batch:
+        for s_name, df in sheets:
+            gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
+            for _, row in df.iterrows():
+                gs_style = str(row.get("STYLE NO", "")).strip().upper()
+                gs_batch = str(row.get("BATCH", "")).strip().upper()
+                if gs_style and gs_style != "NAN":
+                    if match_style_code(p_style_base, gs_style, tag_type):
+                        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                            if match_batch_code(p_batch, gs_batch):
+                                return row
 
-    # Pass 3: Fuzzy prefix match with batch
-    for _, row in df.iterrows():
-        gs_style = str(row.get("STYLE NO", "")).strip().upper()
-        gs_batch = str(row.get("BATCH", "")).strip().upper()
-        if gs_style and gs_style != "NAN":
-            if match_style_code(p_style_base, gs_style, tag_type):
-                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                    if match_batch_code(p_batch, gs_batch):
+    # Phase 4: Fuzzy prefix match with empty batch across all sheets
+    for s_name, df in sheets:
+        gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
+        for _, row in df.iterrows():
+            gs_style = str(row.get("STYLE NO", "")).strip().upper()
+            if gs_style and gs_style != "NAN":
+                if match_style_code(p_style_base, gs_style, tag_type):
+                    if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
                         return row
-                        
-    # Pass 4: Fuzzy prefix match with empty batch
-    for _, row in df.iterrows():
-        gs_style = str(row.get("STYLE NO", "")).strip().upper()
-        gs_batch = str(row.get("BATCH", "")).strip().upper()
-        if gs_style and gs_style != "NAN":
-            if match_style_code(p_style_base, gs_style, tag_type):
-                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
-                    if not gs_batch or gs_batch == "NAN" or gs_batch == "0":
-                        return row
-                            
+
     return None
+
+
+def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garment / Dress Tags"):
+    """Legacy helper for single df lookup."""
+    return find_best_gsheet_row({"current": df}, pdf_style, pdf_sku, tag_type)
 
 
 def clean_prefix(prefix):
@@ -2153,146 +2160,106 @@ def clean_prefix(prefix):
 
 
 def get_updated_fit(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                fit = row.get("FIT")
-                if pd.notna(fit):
-                    return str(fit).strip()
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        fit = row.get("FIT")
+        if pd.notna(fit):
+            return str(fit).strip()
     return None
 
 
 def get_updated_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
-
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                mrp_val = row.get("MRP")
-                if pd.notna(mrp_val):
-                    return mrp_val
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        mrp_val = row.get("MRP")
+        if pd.notna(mrp_val) and str(mrp_val).strip() and str(mrp_val).strip().upper() != "NAN":
+            try:
+                return float(mrp_val)
+            except (ValueError, TypeError):
+                pass
     return None
 
 
 def get_updated_total_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
-
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                box_mrp = row.get("MRP.1")
-                if pd.notna(box_mrp) and str(box_mrp).strip() and str(box_mrp).strip().upper() != "NAN":
-                    try:
-                        return float(box_mrp)
-                    except (ValueError, TypeError):
-                        pass
-                unit_mrp = row.get("MRP")
-                pcs = row.get("PCS PER BOXES")
-                if pd.notna(unit_mrp) and pd.notna(pcs):
-                    try:
-                        return float(unit_mrp) * float(pcs)
-                    except (ValueError, TypeError):
-                        pass
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        box_mrp = row.get("MRP.1")
+        if pd.notna(box_mrp) and str(box_mrp).strip() and str(box_mrp).strip().upper() != "NAN":
+            try:
+                return float(box_mrp)
+            except (ValueError, TypeError):
+                pass
+        unit_mrp = row.get("MRP")
+        pcs = row.get("PCS PER BOXES")
+        if pd.notna(unit_mrp) and pd.notna(pcs):
+            try:
+                return float(unit_mrp) * float(pcs)
+            except (ValueError, TypeError):
+                pass
     return None
 
 
 def get_updated_pcs_per_box(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                pcs = row.get("PCS PER BOXES")
-                if pd.notna(pcs):
-                    try:
-                        return float(pcs)
-                    except (ValueError, TypeError):
-                        pass
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        pcs = row.get("PCS PER BOXES")
+        if pd.notna(pcs):
+            try:
+                return float(pcs)
+            except (ValueError, TypeError):
+                pass
     return None
 
 
 def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        col_name = next((c for c in row.index if str(c).strip() == ","), None)
+        if col_name:
+            val = row.get(col_name)
+            if pd.notna(val) and str(val).strip():
+                return str(val).strip()
+        
+        batch_no_col = next((c for c in row.index if "BATCH NO" in str(c).upper()), None)
+        if batch_no_col:
+            val = row.get(batch_no_col)
+            if pd.notna(val) and str(val).strip() and str(val).strip().upper() != "NAN":
+                return str(val).strip()
 
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                col_name = None
-                for c in df.columns:
-                    if str(c).strip() == ",":
-                        col_name = c
-                        break
-                if col_name:
-                    val = row.get(col_name)
-                    if pd.notna(val) and str(val).strip():
-                        return str(val).strip()
-                
-                gs_s = row.get("STYLE NO")
-                gs_b = row.get("BATCH")
-                b_suffix = f"/{gs_b}" if pd.notna(gs_b) and str(gs_b).strip() and str(gs_b).strip().upper() != "NAN" else ""
-                return f"{gs_s}{b_suffix}"
-
+        gs_s = row.get("STYLE NO")
+        gs_b = row.get("BATCH")
+        b_suffix = f"/{gs_b}" if pd.notna(gs_b) and str(gs_b).strip() and str(gs_b).strip().upper() != "NAN" else ""
+        return f"{gs_s}{b_suffix}"
     return None
 
 
 def get_updated_description(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
-
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                desc = row.get("DESCRIPTION")
-                if pd.notna(desc):
-                    return str(desc).strip()
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        desc = row.get("DESCRIPTION")
+        if pd.notna(desc):
+            return str(desc).strip()
     return None
 
 
 def get_updated_category(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
-    if not gsheet_dfs:
-        return None
-
-    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
-        df = gsheet_dfs.get(sheet_name)
-        if df is not None:
-            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
-            if row is not None:
-                gender_col = None
-                for c in df.columns:
-                    if str(c).upper().strip() in ["GENDER", "590"]:
-                        gender_col = c
-                        break
-                if gender_col:
-                    g_val = row.get(gender_col)
-                    if pd.notna(g_val):
-                        g_str = str(g_val).strip().upper()
-                        if "WOMEN" in g_str or "WOMN" in g_str or "WMN" in g_str:
-                            return "Women's"
-                        elif "MEN" in g_str:
-                            return "Men's"
-                        elif "BOY" in g_str:
-                            return "Boy's"
-                        elif "GIRL" in g_str:
-                            return "Girl's"
-                        elif "KID" in g_str:
-                            return "Kid's"
+    row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
+    if row is not None:
+        gender_col = next((c for c in row.index if str(c).upper().strip() in ["GENDER", "590"]), None)
+        if gender_col:
+            g_val = row.get(gender_col)
+            if pd.notna(g_val):
+                g_str = str(g_val).strip().upper()
+                if "WOMEN" in g_str or "WOMN" in g_str or "WMN" in g_str:
+                    return "Women's"
+                elif "MEN" in g_str:
+                    return "Men's"
+                elif "BOY" in g_str:
+                    return "Boy's"
+                elif "GIRL" in g_str:
+                    return "Girl's"
+                elif "KID" in g_str:
+                    return "Kid's"
     return None
 
 
