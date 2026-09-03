@@ -1960,30 +1960,41 @@ def gender_matches(row_gender, sku_gender):
     return sg == rg
 
 
+def strip_standard_sku_prefix(style_str):
+    s = str(style_str).strip().upper()
+    two_letter = ("MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+    for tl in two_letter:
+        if s.startswith(tl):
+            s = s[len(tl):]
+            break
+    return s
+
+
 def match_style_code(pdf_style_base, gs_style_base, tag_type="Standard Garment / Dress Tags"):
     p_s = str(pdf_style_base).strip().upper()
     g_s = str(gs_style_base).strip().upper()
     
     if p_s == g_s:
         return True
+
+    p_clean_s = strip_standard_sku_prefix(p_s)
+    g_clean_s = strip_standard_sku_prefix(g_s)
+    if p_clean_s == g_clean_s:
+        return True
         
-    p_prefix = "".join([c for c in p_s if c.isalpha()])
-    g_prefix = "".join([c for c in g_s if c.isalpha()])
+    p_prefix = "".join([c for c in p_clean_s if c.isalpha()])
+    g_prefix = "".join([c for c in g_clean_s if c.isalpha()])
     
-    p_clean = clean_prefix(p_prefix)
-    g_clean = clean_prefix(g_prefix)
-    if p_clean and g_clean and p_clean != g_clean:
-        return False
-        
-    if tag_type == "D2C Dress tag file":
-        if p_prefix and g_prefix and p_prefix != g_prefix:
-            if not ((p_prefix == "S" and g_prefix == "WS") or (p_prefix == "WS" and g_prefix == "S")):
-                return False
+    if p_prefix and g_prefix and p_prefix != g_prefix:
+        if tag_type == "D2C Dress tag file" and ((p_prefix == "S" and g_prefix == "WS") or (p_prefix == "WS" and g_prefix == "S")):
+            pass
+        else:
+            return False
                 
     p_digits = "".join([c for c in p_s if c.isdigit()])
     g_digits = "".join([c for c in g_s if c.isdigit()])
     
-    return p_digits == g_digits
+    return p_digits == g_digits and bool(p_digits)
 
 
 def match_batch_code(pdf_batch, gs_batch):
@@ -2084,7 +2095,28 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
             gender_col = c
             break
 
-    # First attempt: match with gender and exact prefix matching
+    p_clean_base = strip_standard_sku_prefix(p_style_base)
+
+    # Pass 1: EXACT Style Code Match with batch match
+    for _, row in df.iterrows():
+        gs_style = str(row.get("STYLE NO", "")).strip().upper()
+        gs_batch = str(row.get("BATCH", "")).strip().upper()
+        if gs_style and gs_style != "NAN":
+            if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                    if match_batch_code(p_batch, gs_batch):
+                        return row
+
+    # Pass 2: EXACT Style Code Match with fallback batch
+    for _, row in df.iterrows():
+        gs_style = str(row.get("STYLE NO", "")).strip().upper()
+        gs_batch = str(row.get("BATCH", "")).strip().upper()
+        if gs_style and gs_style != "NAN":
+            if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                    return row
+
+    # Pass 3: Fuzzy prefix match with batch
     for _, row in df.iterrows():
         gs_style = str(row.get("STYLE NO", "")).strip().upper()
         gs_batch = str(row.get("BATCH", "")).strip().upper()
@@ -2094,7 +2126,7 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
                     if match_batch_code(p_batch, gs_batch):
                         return row
                         
-    # Fallback to match style and empty batch
+    # Pass 4: Fuzzy prefix match with empty batch
     for _, row in df.iterrows():
         gs_style = str(row.get("STYLE NO", "")).strip().upper()
         gs_batch = str(row.get("BATCH", "")).strip().upper()
@@ -2169,6 +2201,23 @@ def get_updated_total_mrp(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Gar
                 if pd.notna(unit_mrp) and pd.notna(pcs):
                     try:
                         return float(unit_mrp) * float(pcs)
+                    except (ValueError, TypeError):
+                        pass
+    return None
+
+
+def get_updated_pcs_per_box(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment / Dress Tags"):
+    if not gsheet_dfs:
+        return None
+    for sheet_name in ["DT FINAL MRP", "New MRP 26-27"]:
+        df = gsheet_dfs.get(sheet_name)
+        if df is not None:
+            row = find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type)
+            if row is not None:
+                pcs = row.get("PCS PER BOXES")
+                if pd.notna(pcs):
+                    try:
+                        return float(pcs)
                     except (ValueError, TypeError):
                         pass
     return None
@@ -2655,6 +2704,10 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if not pdf_val:
                     pdf_val = desc_info
                 excel_val = desc_info if desc_info else (excel_row.get(excel_col) if excel_col else None)
+                if not excel_val:
+                    g_desc = get_updated_description(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                    if g_desc:
+                        excel_val = g_desc
             elif field_name == "Lot No (Google Sheet)":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
                 g_lot = get_updated_lot_no(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
@@ -2665,7 +2718,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_val = db_lot if db_lot and pd.notna(db_lot) and str(db_lot).strip() != "" and str(db_lot).strip().upper() != "NAN" else (tag.get("Style") or base_style_info)
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
-                excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
+                if tag_type in ["B2B Box Sticker tag file", "B2B Bundle Sticker tag file"]:
+                    g_pcs = get_updated_pcs_per_box(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
+                    if g_pcs is not None:
+                        excel_val = g_pcs
+                    else:
+                        excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
+                else:
+                    excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
             elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
                 g_mrp = get_updated_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
