@@ -196,13 +196,23 @@ if st.button("Run Verification", type="primary"):
                         </div>
                     """, unsafe_allow_html=True)
                 
-                # Save Report File
+                # Save Report File (Optimized: write matched rows to prevent 50,000-row memory crash)
                 out_path = os.path.join(script_dir, "tag_comparison_report.xlsx")
                 try:
+                    pdf_skus = set(pdf_df["SKU"].dropna().astype(str).str.strip().str.upper())
+                    sku_cols = [c for c in excel_df.columns if any(k in str(c).lower() for k in ["sku", "item code", "gtin"])]
+                    if sku_cols:
+                        matched_mask = excel_df[sku_cols[0]].astype(str).str.strip().str.upper().isin(pdf_skus)
+                        matched_excel = excel_df[matched_mask]
+                        if len(matched_excel) == 0:
+                            matched_excel = excel_df.head(100)
+                    else:
+                        matched_excel = excel_df.head(100)
+
                     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-                        pdf_df.to_excel(writer, sheet_name="PDF_Extracted", index=False)
-                        excel_df.to_excel(writer, sheet_name="Excel_Master", index=False)
                         report_df.to_excel(writer, sheet_name="Comparison_Report", index=False)
+                        pdf_df.to_excel(writer, sheet_name="PDF_Extracted", index=False)
+                        matched_excel.to_excel(writer, sheet_name="Excel_Matched_Master", index=False)
 
                         # Color the report sheet directly in-memory to prevent BadZipFile errors
                         workbook = writer.book
