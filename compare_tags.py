@@ -171,7 +171,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages):
-            text = page.extract_text() or ""
+            text = (page.extract_text() or "").replace("\x00", "")
             raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
             
             # Check if this page contains tags (must have barcode or MRP)
@@ -480,19 +480,19 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
 def normalize_sku(x):
     if x is None:
         return ""
-    return str(x).strip().upper()
+    return str(x).replace("\x00", "").strip().upper()
 
 
 def normalize_lot(x):
     if x is None:
         return ""
-    return str(x).strip().upper()
+    return str(x).replace("\x00", "").strip().upper()
 
 
 def normalize_barcode(x):
     if x is None or pd.isna(x):
         return ""
-    s = str(x).strip()
+    s = str(x).replace("\x00", "").strip()
     if s.endswith(".0"):
         s = s[:-2]
     try:
@@ -507,7 +507,7 @@ def normalize_text(x):
     if x is None:
         return ""
     import re
-    s = str(x).strip().upper()
+    s = str(x).replace("\x00", "").strip().upper()
     s = s.replace("-", " ").replace("/", " ").replace("_", " ")
     
     # Replace compound words and remove gender prefixes

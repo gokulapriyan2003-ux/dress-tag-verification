@@ -62,10 +62,21 @@ st.markdown('<div class="subtitle">Extract SKU fields from multi-tag PDF and val
 # Auto-detect local files
 script_dir = os.path.dirname(os.path.abspath(__file__))
 local_pdfs = [f for f in os.listdir(script_dir) if f.lower().endswith(".pdf") and not f.startswith("~$")]
-local_xlsxs = [f for f in os.listdir(script_dir) if f.lower().endswith(".xlsx") and not f.startswith("~$") and not any(x in f.lower() for x in ["report", "google", "explore", "comparison"])]
+
+# Prioritize GS1 september.xlsx as the new active master sheet
+september_file = os.path.join(script_dir, "GS1 september.xlsx")
+if os.path.exists(september_file):
+    default_xlsx = september_file
+else:
+    local_xlsxs = [
+        f for f in os.listdir(script_dir)
+        if f.lower().endswith(".xlsx")
+        and not f.startswith("~$")
+        and not any(x in f.lower() for x in ["report", "google", "explore", "comparison", "bak", "old", "closed"])
+    ]
+    default_xlsx = os.path.join(script_dir, local_xlsxs[0]) if local_xlsxs else None
 
 default_pdf = os.path.join(script_dir, local_pdfs[0]) if local_pdfs else None
-default_xlsx = os.path.join(script_dir, local_xlsxs[0]) if local_xlsxs else None
 
 # Layout: Sidebar configuration
 st.sidebar.header("Configuration & Local Files")
