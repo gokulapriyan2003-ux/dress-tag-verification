@@ -345,7 +345,7 @@ def is_likely_data_row(row):
 
 
 def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame:
-    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
     
     # If specific sheet_name requested, try that first; else check all sheets
     if sheet_name and sheet_name in wb.sheetnames:
@@ -432,43 +432,53 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
 
     if best_ws is None or best_header_idx is None:
         available = ", ".join(wb.sheetnames)
+        wb.close()
         raise ValueError(f"Could not find any recognizable header row or table data in the Excel workbook. Available sheets: [{available}]. Please specify the sheet name or check your file format.")
 
-    all_rows = list(best_ws.iter_rows(values_only=True))
+    clean_header = None
+    data_rows = []
 
-    if is_headerless or is_likely_data_row(all_rows[best_header_idx]):
+    if is_headerless:
         standard_cols = ["Barcode", "SKU", "Product Name", "Product Description", "Measurement Unit", "Net Weight", "Target Market", "MRP Activation Date", "MRP Location", "MRP"]
-        n_cols = max(len(r) for r in all_rows[:10]) if all_rows else 10
-        if n_cols <= len(standard_cols):
-            clean_header = standard_cols[:n_cols]
-        else:
-            clean_header = standard_cols + [f"Column_{j+1}" for j in range(len(standard_cols), n_cols)]
-        data_rows = [list(r[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(r)) for r in all_rows if any(c is not None and str(c).strip() != "" for c in r)]
-    else:
-        header_raw = all_rows[best_header_idx]
-        clean_header = []
-        seen = {}
-        for idx, c in enumerate(header_raw):
-            col_name = str(c).strip() if c is not None else ""
-            if not col_name:
-                col_name = f"Column_{idx+1}"
-            if col_name in seen:
-                seen[col_name] += 1
-                col_name = f"{col_name}_{seen[col_name]}"
-            else:
-                seen[col_name] = 0
-            clean_header.append(col_name)
-
-        data_rows = []
-        for row in all_rows[best_header_idx + 1:]:
+        for row in best_ws.iter_rows(values_only=True):
             if not row or all(c is None or str(c).strip() == "" for c in row):
                 continue
-            first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
-            if first_cell == "TOTAL":
-                break
+            if clean_header is None:
+                n_cols = len(row)
+                if n_cols <= len(standard_cols):
+                    clean_header = standard_cols[:n_cols]
+                else:
+                    clean_header = standard_cols + [f"Column_{j+1}" for j in range(len(standard_cols), n_cols)]
             padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
             data_rows.append(padded_row)
+    else:
+        for i, row in enumerate(best_ws.iter_rows(values_only=True)):
+            if i < best_header_idx:
+                continue
+            elif i == best_header_idx:
+                header_raw = row
+                seen = {}
+                clean_header = []
+                for idx, c in enumerate(header_raw):
+                    col_name = str(c).strip() if c is not None else ""
+                    if not col_name:
+                        col_name = f"Column_{idx+1}"
+                    if col_name in seen:
+                        seen[col_name] += 1
+                        col_name = f"{col_name}_{seen[col_name]}"
+                    else:
+                        seen[col_name] = 0
+                    clean_header.append(col_name)
+            else:
+                if not row or all(c is None or str(c).strip() == "" for c in row):
+                    continue
+                first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
+                if first_cell == "TOTAL":
+                    break
+                padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
+                data_rows.append(padded_row)
 
+    wb.close()
     df = pd.DataFrame(data_rows, columns=clean_header)
     return df
 
