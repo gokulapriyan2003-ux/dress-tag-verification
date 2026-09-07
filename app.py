@@ -1,14 +1,17 @@
-# Dress Tag & Master Sheet Verifier Web App (v2.1)
+# Dress Tag & Master Sheet Verifier Web App (v2.2)
 import streamlit as st
 import pandas as pd
 import openpyxl
 import os
 import sys
+import importlib
 import urllib.request
 from openpyxl.styles import PatternFill
 
-# Import the core logic from compare_tags.py
+# Import the core logic from compare_tags.py with forced module reload
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import compare_tags
+importlib.reload(compare_tags)
 from compare_tags import (
     extract_pdf_tags,
     extract_excel_master,
@@ -58,6 +61,7 @@ st.markdown("""
 
 st.markdown('<div class="main-title">Dress Tag & Master Sheet Verifier</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Extract SKU fields from multi-tag PDF and validate them against Excel & Google Sheet references</div>', unsafe_allow_html=True)
+st.caption("⚡ Engine v2.2: Compound SKU Parser (TSMLAR ➔ Thunder Storm) & GS1 September Master active")
 
 # Auto-detect local files
 script_dir = os.path.dirname(os.path.abspath(__file__))
