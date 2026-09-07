@@ -2337,33 +2337,42 @@ def extract_sku_details_with_batch(sku_str):
 
     size_keywords = ["08Y", "10Y", "12Y", "14Y", "02Y", "04Y", "06Y", "2Y", "4Y", "6Y", "8Y", "XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
     
-    found_size = None
-    size_pos = -1
-    for sz_kw in size_keywords:
-        pos = sku.find(sz_kw)
-        if pos != -1:
-            if pos >= 5:
-                found_size = sz_kw
-                size_pos = pos
-                break
-                
-    if found_size:
-        left = sku[:size_pos]
-        batch = sku[size_pos + len(found_size):]
-        
-        color = left[-3:]
-        rest = left[:-3]
-        
-        if rest.startswith(("MCS", "WCS")):
-            style = rest[3:]
-        elif rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
-            style = rest[2:]
-        elif rest.startswith(("M", "W", "K", "B", "G")):
-            style = rest[1:]
+    # Strip batch from end if present
+    if sku.endswith(("2PK", "3PK")):
+        batch = sku[-6:]
+        sku_without_batch = sku[:-6]
+    else:
+        m = re.search(r"\d+$", sku)
+        if m:
+            batch = m.group()
+            sku_without_batch = sku[:-len(batch)]
         else:
-            style = rest
+            batch = ""
+            sku_without_batch = sku
+
+    found_size = None
+    for sz_kw in size_keywords:
+        if sku_without_batch.endswith(sz_kw):
+            found_size = sz_kw
+            break
+
+    if found_size:
+        size_idx = len(sku_without_batch) - len(found_size)
+        left = sku_without_batch[:size_idx]
+        if len(left) >= 5:
+            color = left[-3:]
+            rest = left[:-3]
             
-        return style, color, found_size, batch
+            if rest.startswith(("MCS", "WCS")):
+                style = rest[3:]
+            elif rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
+                style = rest[2:]
+            elif rest.startswith(("M", "W", "K", "B", "G")):
+                style = rest[1:]
+            else:
+                style = rest
+                
+            return style, color, found_size, batch
 
     # Fallback to legacy length rules
     if sku.endswith(("2PK", "3PK")):
@@ -2812,14 +2821,13 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     excel_val = parse_fit_from_text(prod_name) or parse_fit_from_text(prod_desc)
             elif field_name == "Category":
                 pdf_val = tag.get("Category")
-                if excel_col:
-                    excel_val = excel_row.get(excel_col)
-                else:
+                excel_val = excel_row.get(excel_col) if (excel_row is not None and excel_col) else None
+                if not excel_val or pd.isna(excel_val) or str(excel_val).strip() == "" or str(excel_val).strip().upper() in ["NAN", "NONE"]:
                     g_cat = get_updated_category(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                     if g_cat:
                         excel_val = g_cat
                     else:
-                        prod_text = (str(excel_row.get(desc_col) or "") + " " + str(excel_row.get("Product Description") or "")).upper()
+                        prod_text = (str((excel_row.get(desc_col) if excel_row else "") or "") + " " + str((excel_row.get("Product Description") if excel_row else "") or "")).upper()
                         if "WOMEN" in prod_text:
                             excel_val = "Women's"
                         elif "MEN" in prod_text:
