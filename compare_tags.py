@@ -48,19 +48,23 @@ for canonical, variations in CANONICAL_LABELS.items():
         LABELS.append(var)
         LABEL_TO_CANONICAL[var] = canonical
 
-BARCODE_RE = re.compile(r"^\d{8,14}$")          # standalone barcode line
+BARCODE_RE = re.compile(r"^(890\d{10}|\d{12,14})$")          # standalone barcode (EAN-13, UPC, GTIN-14)
 CM_RE = re.compile(r"^\(\d+(\.\d+)?CM\)$")       # e.g. (71.12CM)
 
 
 def extract_barcodes_from_line(line: str):
+    # HSN Code lines (e.g. HSN Code: 61103010) must never be extracted as barcodes
+    if any(h in line.upper() for h in ["HSN", "HSN CODE", "HSN:"]):
+        return []
     found = []
     spaced = re.findall(r"\b(\d)\s+(\d{6})\s+(\d{6})\b", line)
     if spaced:
         for m in spaced:
             found.append(f"{m[0]}{m[1]}{m[2]}")
     for t in line.split():
-        if BARCODE_RE.match(t):
-            found.append(t)
+        t_clean = t.replace("\x00", "").strip()
+        if BARCODE_RE.match(t_clean) and not t_clean.startswith("61"):
+            found.append(t_clean)
     return found
 
 
@@ -191,10 +195,12 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 b_list = extract_barcodes_from_line(line)
                 if b_list:
                     barcodes.extend(b_list)
-                    continue
+                    has_labels = any(lbl in line.upper() for lbl in ["SKU", "MRP", "QTY", "LOT", "STYLE", "SIZE", "PRODUCT", "COLOR", "FIT", "NET", "HSN", "MFD"])
+                    if not has_labels:
+                        continue
 
-                # 1. Check for MRP line containing quantities
-                mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?)\s*\)", line, re.IGNORECASE))
+                # 1. Check for MRP line containing quantities (e.g. ₹589/-(1N), ₹4712/-(08Nos))
+                mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?|N)\s*\)", line, re.IGNORECASE))
                 if mrp_matches:
                     for m in mrp_matches:
                         price = float(m.group(1).replace(",", ""))
