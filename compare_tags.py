@@ -2375,39 +2375,6 @@ def extract_sku_details_with_batch(sku_str):
             return style, color, found_size, batch
 
     # Fallback to legacy length rules
-    if sku.endswith(("2PK", "3PK")):
-        batch = sku[-6:]
-        sku_without_batch = sku[:-6]
-    else:
-        m = re.search(r"\d+$", sku)
-        if m:
-            batch = m.group()
-            sku_without_batch = sku[:-len(batch)]
-        else:
-            batch = ""
-            sku_without_batch = sku
-
-    found_size = None
-    for sz_kw in size_keywords:
-        if sku_without_batch.endswith(sz_kw):
-            found_size = sz_kw
-            break
-
-    if found_size:
-        size_idx = len(sku_without_batch) - len(found_size)
-        left = sku_without_batch[:size_idx]
-        if len(left) >= 5:
-            color = left[-3:]
-            rest = left[:-3]
-            if rest.startswith(("MCS", "WCS")):
-                style = rest[3:]
-            elif rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
-                style = rest[2:]
-            elif rest.startswith(("M", "W", "K", "B", "G")):
-                style = rest[1:]
-            else:
-                style = rest
-            return style, color, found_size, batch
 
     rules = {
         11: (2, 4, 0),
