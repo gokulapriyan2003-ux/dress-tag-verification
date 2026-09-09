@@ -2814,7 +2814,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if sku_col:
                     excel_row[sku_col] = pdf_sku_norm
                 if barcode_col:
-                    excel_row[barcode_col] = None
+                    excel_row[barcode_col] = pdf_barcode_norm if (pdf_barcode_norm and len(pdf_barcode_norm) >= 8) else None
                 if size_col:
                     excel_row[size_col] = size_code
                 if color_col:
