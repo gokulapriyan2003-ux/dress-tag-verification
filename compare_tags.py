@@ -2121,10 +2121,13 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
     p_parts = style_clean.split("/")
     p_style_base = p_parts[0].strip()
     p_batch = p_parts[1].strip() if len(p_parts) > 1 else ""
-    if not p_batch and pdf_sku:
+    if pdf_sku:
         res = extract_sku_details_with_batch(pdf_sku)
         if res and len(res) == 4:
-            p_batch = res[3]
+            if not p_style_base and res[0]:
+                p_style_base = res[0]
+            if not p_batch and res[3]:
+                p_batch = res[3]
 
     sku_gender = detect_gender_from_sku(pdf_sku)
     p_clean_base = strip_standard_sku_prefix(p_style_base)
@@ -2612,6 +2615,13 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         raise ValueError(f"Could not find an SKU or Identifier column in the Excel sheet. Available columns: [{cols_preview}]")
 
     excel_idx_sku = {normalize_sku(row[sku_col]): row for _, row in excel_df.iterrows()}
+    excel_idx_sku_all = {}
+    for _, row in excel_df.iterrows():
+        s_norm = normalize_sku(row[sku_col])
+        if s_norm:
+            if s_norm not in excel_idx_sku_all:
+                excel_idx_sku_all[s_norm] = []
+            excel_idx_sku_all[s_norm].append(row)
     
     excel_idx_barcode = {}
     candidate_barcode_cols = [barcode_col] if barcode_col else []
@@ -2672,10 +2682,39 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         pdf_sku_norm = normalize_sku(tag["SKU"])
         pdf_barcode_norm = normalize_barcode(tag.get("EAN") or tag.get("Barcode"))
         
-        # 1. Lookup by SKU first
-        excel_row = excel_idx_sku.get(pdf_sku_norm)
+        excel_row = None
         
-        # 2. Fallback to lookup by Barcode/GTIN if SKU is not found
+        # 1. Best match: Exact match on BOTH SKU and Barcode (disambiguates multiple product revisions for same SKU)
+        if pdf_barcode_norm and pdf_barcode_norm in excel_idx_barcode:
+            b_row = excel_idx_barcode[pdf_barcode_norm]
+            if normalize_sku(b_row.get(sku_col)) == pdf_sku_norm:
+                excel_row = b_row
+
+        # 2. Match by SKU from candidate rows
+        if excel_row is None and pdf_sku_norm in excel_idx_sku_all:
+            candidates = excel_idx_sku_all[pdf_sku_norm]
+            if len(candidates) == 1:
+                excel_row = candidates[0]
+            else:
+                best_cand = None
+                if pdf_barcode_norm:
+                    for cand in candidates:
+                        cand_bcs = [normalize_barcode(cand.get(bc)) for bc in candidate_barcode_cols if cand.get(bc)]
+                        if pdf_barcode_norm in cand_bcs:
+                            best_cand = cand
+                            break
+                if best_cand is None and (tag.get("Description") or tag.get("Product")):
+                    p_desc_words = set(re.findall(r"\w+", str(tag.get("Description") or tag.get("Product")).upper()))
+                    for cand in reversed(candidates):
+                        c_desc = str(cand.get(desc_col) or cand.get("Product Description") or "").upper()
+                        c_desc_words = set(re.findall(r"\w+", c_desc))
+                        if not check_conflicting_product_type(p_desc_words, c_desc_words):
+                            if p_desc_words.intersection(c_desc_words):
+                                best_cand = cand
+                                break
+                excel_row = best_cand if best_cand is not None else candidates[-1]
+
+        # 3. Fallback to lookup by Barcode/GTIN if SKU is not found
         if excel_row is None and pdf_barcode_norm:
             excel_row = excel_idx_barcode.get(pdf_barcode_norm)
 
@@ -2753,10 +2792,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         excel_val = g_desc
             elif field_name == "Lot No (Google Sheet)":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
+                if not pdf_val or pd.isna(pdf_val) or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() in ["NAN", "NONE"]:
+                    continue
                 g_lot = get_updated_lot_no(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type)
                 excel_val = g_lot if g_lot and pd.notna(g_lot) and str(g_lot).strip() != "" and str(g_lot).strip().upper() != "NAN" else (tag.get("Style") or base_style_info)
             elif field_name == "Lot No (GS1 Master)":
                 pdf_val = tag.get("Lot No") or tag.get("Style")
+                if not pdf_val or pd.isna(pdf_val) or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() in ["NAN", "NONE"]:
+                    continue
                 db_lot = lot_info if lot_info else (excel_row.get(excel_col) if excel_col else None)
                 excel_val = db_lot if db_lot and pd.notna(db_lot) and str(db_lot).strip() != "" and str(db_lot).strip().upper() != "NAN" else (tag.get("Style") or base_style_info)
             elif field_name == "Qty":
