@@ -1,4 +1,4 @@
-# Dress Tag & Master Sheet Verifier Web App (v2.3)
+# Dress Tag & Master Sheet Verifier Web App (v2.4)
 import streamlit as st
 import pandas as pd
 import openpyxl
@@ -61,7 +61,7 @@ st.markdown("""
 
 st.markdown('<div class="main-title">Dress Tag & Master Sheet Verifier</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Extract SKU fields from multi-tag PDF and validate them against Excel & Google Sheet references</div>', unsafe_allow_html=True)
-st.caption("⚡ Engine v2.3: B2B Sticker HSN Exclusion & 1N MRP Parser Active")
+st.caption("⚡ Engine v2.4: 0-byte File Guard & B2B Sticker Verification Active")
 
 # Auto-detect local files
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -117,7 +117,10 @@ sheet_name = st.sidebar.text_input("Excel Sheet Name (Optional, uses first sheet
 
 # Setup paths based on uploads or local defaults
 target_pdf = None
-if pdf_file:
+if pdf_file is not None:
+    if getattr(pdf_file, "size", 0) == 0 or len(pdf_file.getbuffer()) == 0:
+        st.error("❌ The uploaded PDF file is empty (0.0B). Please wait for the upload to finish or select a valid PDF file.")
+        st.stop()
     # Save uploaded file to temp path
     target_pdf = os.path.join(script_dir, "temp_uploaded_tags.pdf")
     with open(target_pdf, "wb") as f:
@@ -126,7 +129,10 @@ elif default_pdf:
     target_pdf = default_pdf
 
 target_xlsx = None
-if xlsx_file:
+if xlsx_file is not None:
+    if getattr(xlsx_file, "size", 0) == 0 or len(xlsx_file.getbuffer()) == 0:
+        st.error("❌ The uploaded Master Excel file is empty (0.0B). Please wait for the upload to finish or select a valid Excel file.")
+        st.stop()
     target_xlsx = os.path.join(script_dir, "temp_uploaded_master.xlsx")
     with open(target_xlsx, "wb") as f:
         f.write(xlsx_file.getbuffer())
@@ -135,10 +141,10 @@ elif default_xlsx:
 
 # Run Verification Button
 if st.button("Run Verification", type="primary"):
-    if not target_pdf:
-        st.error("Please upload a PDF file or place one in the script directory.")
-    elif not target_xlsx:
-        st.error("Please upload a Master Excel file or place one in the script directory.")
+    if not target_pdf or not os.path.exists(target_pdf) or os.path.getsize(target_pdf) == 0:
+        st.error("❌ Please upload a valid Tag PDF file (the current file is missing or 0.0B).")
+    elif not target_xlsx or not os.path.exists(target_xlsx) or os.path.getsize(target_xlsx) == 0:
+        st.error("❌ Please upload a valid Master Excel file (the current file is missing or 0.0B).")
     else:
         with st.spinner("Processing..."):
             # Download updated MRP Google Sheet
@@ -275,5 +281,9 @@ if st.button("Run Verification", type="primary"):
                     st.dataframe(report_df, use_container_width=True)
                     
             except Exception as ex:
-                st.error(f"Error during processing: {ex}")
-                st.exception(ex)
+                err_str = str(ex)
+                if "No /Root object" in err_str or "PdfminerException" in type(ex).__name__:
+                    st.error("❌ Could not read the uploaded PDF: The file is empty (0.0B) or corrupted. Please check the PDF file on your computer, re-download it if necessary, and re-upload.")
+                else:
+                    st.error(f"Error during processing: {ex}")
+                    st.exception(ex)

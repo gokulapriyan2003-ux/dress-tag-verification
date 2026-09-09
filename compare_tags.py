@@ -82,6 +82,11 @@ def split_repeated_label_case_insensitive(line: str, label: str):
 
 
 def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
+    if not pdf_path or not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    if os.path.getsize(pdf_path) == 0:
+        raise ValueError(f"The PDF file '{os.path.basename(pdf_path)}' is empty (0 bytes). Please ensure the file was completely downloaded and re-upload.")
+
     field_lists = {lbl: [] for lbl in CANONICAL_LABELS.keys()}
     barcodes = []
     cm_sizes = []
