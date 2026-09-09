@@ -1,4 +1,4 @@
-# Dress Tag & Master Sheet Verifier Web App (v2.6)
+# Dress Tag & Master Sheet Verifier Web App (v2.7)
 import streamlit as st
 import pandas as pd
 import openpyxl
@@ -61,7 +61,7 @@ st.markdown("""
 
 st.markdown('<div class="main-title">Dress Tag & Master Sheet Verifier</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Extract SKU fields from multi-tag PDF and validate them against Excel & Google Sheet references</div>', unsafe_allow_html=True)
-st.caption("⚡ Engine v2.4: 0-byte File Guard & B2B Sticker Verification Active")
+st.caption("⚡ Engine v2.7: Differential Size MRP & Barcode Precision Active")
 
 # Auto-detect local files
 script_dir = os.path.dirname(os.path.abspath(__file__))
