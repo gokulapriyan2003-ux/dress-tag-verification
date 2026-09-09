@@ -2136,7 +2136,7 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
     if p_batch:
         for s_name, df in sheets:
             gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
-            for _, row in df.iterrows():
+            for _, row in df.iloc[::-1].iterrows():
                 gs_style = str(row.get("STYLE NO", "")).strip().upper()
                 gs_batch = str(row.get("BATCH", "")).strip().upper()
                 if gs_style and gs_style != "NAN":
@@ -2145,10 +2145,10 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
                             if match_batch_code(p_batch, gs_batch):
                                 return row
 
-    # Phase 2: EXACT Style Code Match with fallback batch across all sheets
+    # Phase 2: EXACT Style Code Match with fallback batch across all sheets (newest batch first)
     for s_name, df in sheets:
         gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
-        for _, row in df.iterrows():
+        for _, row in df.iloc[::-1].iterrows():
             gs_style = str(row.get("STYLE NO", "")).strip().upper()
             if gs_style and gs_style != "NAN":
                 if strip_standard_sku_prefix(gs_style) == p_clean_base:
@@ -2159,7 +2159,7 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
     if p_batch:
         for s_name, df in sheets:
             gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
-            for _, row in df.iterrows():
+            for _, row in df.iloc[::-1].iterrows():
                 gs_style = str(row.get("STYLE NO", "")).strip().upper()
                 gs_batch = str(row.get("BATCH", "")).strip().upper()
                 if gs_style and gs_style != "NAN":
@@ -2168,10 +2168,10 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
                             if match_batch_code(p_batch, gs_batch):
                                 return row
 
-    # Phase 4: Fuzzy prefix match with empty batch across all sheets
+    # Phase 4: Fuzzy prefix match with empty batch across all sheets (newest batch first)
     for s_name, df in sheets:
         gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
-        for _, row in df.iterrows():
+        for _, row in df.iloc[::-1].iterrows():
             gs_style = str(row.get("STYLE NO", "")).strip().upper()
             if gs_style and gs_style != "NAN":
                 if match_style_code(p_style_base, gs_style, tag_type):
@@ -2273,8 +2273,24 @@ def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garmen
             return m.group(1)
         return f"{comp[0]}{comp[1]}"
 
+    p_batch = ""
+    if pdf_style and "/" in str(pdf_style):
+        p_batch = str(pdf_style).split("/")[1].strip()
+    elif pdf_sku:
+        res = extract_sku_details_with_batch(pdf_sku)
+        if res and len(res) == 4 and res[3]:
+            p_batch = res[3]
+
     row = find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type)
     if row is not None:
+        gs_b = row.get("BATCH")
+        # If tag has a specific batch, and the found row has a different batch,
+        # it means Google Sheet does not have this new batch yet.
+        # Do NOT downgrade the tag's lot number to an older batch!
+        if p_batch and gs_b and pd.notna(gs_b) and str(gs_b).strip() and str(gs_b).strip().upper() != "NAN":
+            if not match_batch_code(p_batch, str(gs_b).strip()):
+                return str(pdf_style).strip() if pdf_style else None
+
         col_name = next((c for c in row.index if str(c).strip() == ","), None)
         if col_name:
             val = row.get(col_name)
@@ -2288,7 +2304,6 @@ def get_updated_lot_no(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garmen
                 return str(val).strip()
 
         gs_s = row.get("STYLE NO")
-        gs_b = row.get("BATCH")
         b_suffix = f"/{gs_b}" if pd.notna(gs_b) and str(gs_b).strip() and str(gs_b).strip().upper() != "NAN" else ""
         return f"{gs_s}{b_suffix}"
     return None
@@ -2353,7 +2368,7 @@ def extract_sku_details_with_batch(sku_str):
         batch = sku[-6:]
         sku_without_batch = sku[:-6]
     else:
-        m = re.search(r"\d+$", sku)
+        m = re.search(r"(?:[A-Z]\d+|\d+)$", sku)
         if m:
             batch = m.group()
             sku_without_batch = sku[:-len(batch)]
@@ -2429,7 +2444,8 @@ def extract_sku_details_with_batch(sku_str):
                 style = style[1:]
             color = sku[-9:-6]
             size = sku[-6:-3]
-            return style, color, size, ""
+            batch = sku[-3:]
+            return style, color, size, batch
 
     start_remove, style_len, end_remove = rules[n]
     body = sku[start_remove:]
@@ -2663,22 +2679,22 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
         if excel_row is None and pdf_barcode_norm:
             excel_row = excel_idx_barcode.get(pdf_barcode_norm)
 
-        # 3. Fallback: match by SKU prefix / batch variant (e.g. MTOR40BLMMED vs MTOR40BLMMED010)
+        # 3. Fallback: match by Style + Color + Size + Batch (prevent matching different batch variants)
         if excel_row is None:
-            for ex_sku, r in excel_idx_sku.items():
-                if ex_sku.startswith(pdf_sku_norm) or pdf_sku_norm.startswith(ex_sku):
-                    excel_row = r
-                    break
-
-        # 4. Fallback: match by Style + Color + Size
-        if excel_row is None:
-            tag_style, tag_color, tag_size = extract_sku_details(pdf_sku_norm)
-            if tag_style and tag_color and tag_size:
+            tag_res = extract_sku_details_with_batch(pdf_sku_norm)
+            if tag_res and tag_res[0]:
+                tag_style, tag_color, tag_size, tag_batch = tag_res
                 for ex_sku, r in excel_idx_sku.items():
-                    es, ec, ez = extract_sku_details(ex_sku)
-                    if es == tag_style and ec == tag_color and ez == tag_size:
-                        excel_row = r
-                        break
+                    ex_res = extract_sku_details_with_batch(ex_sku)
+                    if ex_res and ex_res[0]:
+                        es, ec, ez, eb = ex_res
+                        if es == tag_style and ec == tag_color and ez == tag_size:
+                            if tag_batch and eb and match_batch_code(tag_batch, eb):
+                                excel_row = r
+                                break
+                            elif not tag_batch and not eb:
+                                excel_row = r
+                                break
 
         is_simulated = False
         if excel_row is None:
