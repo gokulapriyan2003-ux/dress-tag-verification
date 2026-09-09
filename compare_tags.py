@@ -446,7 +446,16 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
         wb.close()
         raise ValueError(f"Could not find any recognizable header row or table data in the Excel workbook. Available sheets: [{available}]. Please specify the sheet name or check your file format.")
 
+    RELEVANT_MASTER_KEYWORDS = [
+        "SKU", "ITEM", "PRODUCT", "ARTICLE", "MATERIAL", "GTIN", "BARCODE", "BAR CODE",
+        "EAN", "UPC", "DESCRIPTION", "DESC", "NAME", "MRP", "PRICE", "COLOR", "COLOUR",
+        "SHADE", "SIZE", "LOT", "BATCH", "STYLE", "QTY", "QUANTITY", "PCS", "CATEGORY",
+        "CAT", "GENDER"
+    ]
+
     clean_header = None
+    final_header = None
+    keep_indices = None
     data_rows = []
 
     if is_headerless:
@@ -462,6 +471,7 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
                     clean_header = standard_cols + [f"Column_{j+1}" for j in range(len(standard_cols), n_cols)]
             padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
             data_rows.append(padded_row)
+        final_header = clean_header
     else:
         for i, row in enumerate(best_ws.iter_rows(values_only=True)):
             if i < best_header_idx:
@@ -480,17 +490,30 @@ def extract_excel_master(xlsx_path: str, sheet_name: str = None) -> pd.DataFrame
                     else:
                         seen[col_name] = 0
                     clean_header.append(col_name)
+
+                # Selectively keep only columns needed for verification if workbook is wide (>30 cols)
+                if len(clean_header) > 30:
+                    keep_indices = [
+                        idx for idx, c in enumerate(clean_header)
+                        if any(k in str(c).upper() for k in RELEVANT_MASTER_KEYWORDS)
+                    ]
+                    if len(keep_indices) < 5:
+                        keep_indices = list(range(len(clean_header)))
+                else:
+                    keep_indices = list(range(len(clean_header)))
+                final_header = [clean_header[idx] for idx in keep_indices]
             else:
                 if not row or all(c is None or str(c).strip() == "" for c in row):
                     continue
                 first_cell = str(row[0]).strip().upper() if row[0] is not None else ""
                 if first_cell == "TOTAL":
                     break
-                padded_row = list(row[:len(clean_header)]) + [None] * max(0, len(clean_header) - len(row))
-                data_rows.append(padded_row)
+                row_len = len(row)
+                selected_row = [row[idx] if idx < row_len else None for idx in keep_indices]
+                data_rows.append(selected_row)
 
     wb.close()
-    df = pd.DataFrame(data_rows, columns=clean_header)
+    df = pd.DataFrame(data_rows, columns=final_header if final_header else clean_header)
     return df
 
 
@@ -2401,46 +2424,48 @@ def get_updated_category(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garm
 
 def extract_sku_details_with_batch(sku_str):
     sku = str(sku_str).strip().upper()
+    if not sku:
+        return None, None, None, ""
     n = len(sku)
 
-    size_keywords = ["08Y", "10Y", "12Y", "14Y", "02Y", "04Y", "06Y", "2Y", "4Y", "6Y", "8Y", "XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR", "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL", "XS", "S", "M", "L", "XL"]
-    
-    # Strip batch from end if present
+    size_keywords = [
+        "02Y", "04Y", "06Y", "08Y", "10Y", "12Y", "14Y", "16Y",
+        "2Y", "4Y", "6Y", "8Y",
+        "XSML", "SML", "MED", "LAR", "XLR", "2XLR", "3XLR", "4XLR", "5XLR",
+        "XXL", "XXXL", "XXXXL", "2XL", "3XL", "4XL", "5XL",
+        "XS", "S", "M", "L", "XL",
+        "28", "30", "32", "34", "36", "38", "40", "42", "44", "46", "48",
+        "06UK", "07UK", "08UK", "09UK", "10UK", "11UK", "12UK", "6UK", "7UK", "8UK", "9UK"
+    ]
+
+    pack_suffix = ""
+    rest_sku = sku
     if sku.endswith(("2PK", "3PK")):
-        batch = sku[-6:]
-        sku_without_batch = sku[:-6]
-    else:
-        m = re.search(r"(?:[A-Z]\d+|\d+)$", sku)
+        pack_suffix = sku[-3:]
+        rest_sku = sku[:-3]
+
+    for sz in sorted(size_keywords, key=len, reverse=True):
+        pattern = rf"({re.escape(sz)})([A-Z0-9]*)$"
+        m = re.search(pattern, rest_sku)
         if m:
-            batch = m.group()
-            sku_without_batch = sku[:-len(batch)]
-        else:
-            batch = ""
-            sku_without_batch = sku
-
-    found_size = None
-    for sz_kw in size_keywords:
-        if sku_without_batch.endswith(sz_kw):
-            found_size = sz_kw
-            break
-
-    if found_size:
-        size_idx = len(sku_without_batch) - len(found_size)
-        left = sku_without_batch[:size_idx]
-        if len(left) >= 5:
-            color = left[-3:]
-            rest = left[:-3]
-            
-            if rest.startswith(("MCS", "WCS")):
-                style = rest[3:]
-            elif rest.startswith(("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")):
-                style = rest[2:]
-            elif rest.startswith(("M", "W", "K", "B", "G")):
-                style = rest[1:]
-            else:
-                style = rest
-                
-            return style, color, found_size, batch
+            sz_found = m.group(1)
+            cand_batch = m.group(2) + (pack_suffix if pack_suffix else "")
+            left = rest_sku[:-len(m.group(0))]
+            if len(left) >= 5:
+                color = left[-3:]
+                prefix_style = left[:-3]
+                style = prefix_style
+                for pfx in [
+                    "MCS", "WCS", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI",
+                    "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD",
+                    "M", "W", "K", "B", "G"
+                ]:
+                    if prefix_style.startswith(pfx) and len(prefix_style) > len(pfx):
+                        style = prefix_style[len(pfx):]
+                        break
+                if len(style) >= 3 and style[1:3] == "OR":
+                    style = style[1:]
+                return style, color, sz_found, cand_batch
 
     # Fallback to legacy length rules
 
