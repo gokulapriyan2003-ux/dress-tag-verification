@@ -1,4 +1,4 @@
-# Dress Tag & Master Sheet Verifier Web App (v2.4)
+# Dress Tag & Master Sheet Verifier Web App (v2.5)
 import streamlit as st
 import pandas as pd
 import openpyxl
