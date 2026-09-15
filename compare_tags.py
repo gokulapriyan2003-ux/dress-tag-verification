@@ -556,6 +556,7 @@ def normalize_text(x):
     
     # Replace compound words and remove gender prefixes
     replacements = {
+        "RUGULAR": "REGULAR",
         "TRACKPANT": "TRACK PANT",
         "TRACKPANTS": "TRACK PANT",
         "TRACK PANTS": "TRACK PANT",
@@ -576,6 +577,33 @@ def normalize_text(x):
         
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+
+def normalize_fit(x):
+    if x is None or pd.isna(x):
+        return ""
+    import re
+    s = str(x).replace("\x00", "").strip().upper()
+    s = s.replace("-", " ").replace("/", " ").replace("_", " ")
+    s = s.replace("RUGULAR", "REGULAR")
+    words = s.split()
+    if not words:
+        return ""
+    if "REGULAR" in words or "REG" in words:
+        return "REGULAR FIT"
+    if "SLIM" in words:
+        return "SLIM FIT"
+    if "OVERSIZED" in words or "OVERSIZE" in words:
+        return "OVERSIZED FIT"
+    if "RELAXED" in words or "RELAX" in words:
+        return "RELAXED FIT"
+    if "COMFORT" in words:
+        return "COMFORT FIT"
+    if "LOOSE" in words:
+        return "LOOSE FIT"
+    if "ATHLETIC" in words:
+        return "ATHLETIC FIT"
+    return " ".join(words)
 
 
 def normalize_size(x):
@@ -1954,12 +1982,16 @@ def parse_fit_from_text(text):
     if not text or pd.isna(text):
         return None
     t = str(text).upper()
-    if "REGULAR" in t:
+    if "REGULAR" in t or "RUGULAR" in t:
         return "Regular Fit"
     if "SLIM" in t:
         return "Slim Fit"
     if "OVERSIZED" in t or "OVERSIZE" in t:
         return "Oversized Fit"
+    if "RELAXED" in t or "RELAX" in t:
+        return "Relaxed Fit"
+    if "COMFORT" in t:
+        return "Comfort Fit"
     return None
 
 
@@ -2269,7 +2301,18 @@ def get_updated_fit(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garment /
     if row is not None:
         fit = row.get("FIT")
         if pd.notna(fit):
-            return str(fit).strip()
+            raw_fit = str(fit).strip()
+            if "RUGULAR" in raw_fit.upper() or "REGULAR" in raw_fit.upper():
+                return "Regular Fit"
+            elif "SLIM" in raw_fit.upper():
+                return "Slim Fit"
+            elif "OVERSIZED" in raw_fit.upper() or "OVERSIZE" in raw_fit.upper():
+                return "Oversized Fit"
+            elif "RELAXED" in raw_fit.upper():
+                return "Relaxed Fit"
+            elif "COMFORT" in raw_fit.upper():
+                return "Comfort Fit"
+            return raw_fit
     return None
 
 
@@ -2727,7 +2770,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     else:
         field_map = [
             ("Description", desc_col, normalize_text),
-            ("Fit", None, normalize_text),
+            ("Fit", None, normalize_fit),
             ("Category", category_col, normalize_category_value),
             ("MRP", None, normalize_number),
             ("SKU", sku_col, normalize_sku),
@@ -2913,6 +2956,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                             excel_val = None
             elif field_name == "Fit":
                 pdf_val = tag.get("Fit")
+                if not pdf_val or pd.isna(pdf_val) or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() in ["NAN", "NONE"]:
+                    continue
                 g_fit = get_updated_fit(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
                 if g_fit:
                     excel_val = g_fit
@@ -3107,11 +3152,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 is_match = base_match and batch_match
                 status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "Fit":
+                p_f = normalize_fit(pdf_val)
+                e_f = normalize_fit(excel_val)
                 is_match = (
                     pdf_norm == excel_norm
-                    or (bool(pdf_norm) and bool(excel_norm) and (
-                        pdf_norm in excel_norm
-                        or excel_norm in pdf_norm
+                    or p_f == e_f
+                    or (bool(p_f) and bool(e_f) and (
+                        p_f in e_f
+                        or e_f in p_f
                     ))
                 )
                 status = "✅ Match" if is_match else "❌ Mismatch"
