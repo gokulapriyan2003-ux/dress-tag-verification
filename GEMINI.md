@@ -46,3 +46,5 @@ Technosport SKUs follow strict prefix conventions. The verifier must ALWAYS main
   Suffixes like `ASC08Y001`, `008`, `2PK`, `3PK` represent multi-packs or batch variants. The engine strips batch codes when checking base styles while retaining them for pack quantity and price calculations.
 - **Category Synonyms**:
   `Kid's`, `Kids Clothing`, and `Boy's` are equivalent apparel categories and must evaluate to `Match`.
+- **Garment Category Prefix Typo Tolerance (v3.2)**:
+  In Master sheets, pants/bottomwear are occasionally entered with `WT` or `MT` instead of `WP` or `MP` (e.g. `WR134/5 WOMENS BASIC TRACKPANT` with `WTW134CHAMED` vs tag `WPW134CHAMED`). The engine recognizes they share the same gender and core SKU (`Style + Color + Size`), automatically linking and evaluating them as `✅ Match`.

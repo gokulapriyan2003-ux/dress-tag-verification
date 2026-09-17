@@ -2819,7 +2819,22 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                             if p_desc_words.intersection(c_desc_words):
                                 best_cand = cand
                                 break
-                excel_row = best_cand if best_cand is not None else candidates[-1]
+        # 2b. Match by SKU with alternate garment category prefix (e.g. WP <-> WT, MP <-> MT for same gender)
+        if excel_row is None and len(pdf_sku_norm) >= 5:
+            alt_prefixes = {
+                "WP": ["WT", "WS"], "WT": ["WP", "WS"], "WS": ["WP", "WT"],
+                "MP": ["MT", "MS"], "MT": ["MP", "MS"], "MS": ["MP", "MT"],
+                "BP": ["BT", "BS"], "BT": ["BP", "BS"], "BS": ["BP", "BT"],
+                "GP": ["GT", "GS"], "GT": ["GP", "GS"], "GS": ["GP", "GT"],
+            }
+            pfx = pdf_sku_norm[:2]
+            if pfx in alt_prefixes:
+                core = pdf_sku_norm[2:]
+                for ap in alt_prefixes[pfx]:
+                    cand_sku = ap + core
+                    if cand_sku in excel_idx_sku_all:
+                        excel_row = excel_idx_sku_all[cand_sku][0]
+                        break
 
         # 3. Fallback to lookup by Barcode/GTIN if SKU is not found (with gender compatibility check)
         if excel_row is None and pdf_barcode_norm:
@@ -3197,6 +3212,20 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     or (p_c in ["KIDS", "BOYS", "GIRLS"] and e_c in ["KIDS", "BOYS", "GIRLS"])
                     or gender_matches(excel_val, p_c)
                 )
+            elif field_name == "SKU":
+                p_s = str(pdf_norm).strip().upper()
+                e_s = str(excel_norm).strip().upper()
+                if p_s == e_s:
+                    is_match = True
+                else:
+                    g_p = detect_gender_from_sku(p_s)
+                    g_e = detect_gender_from_sku(e_s)
+                    core_p = strip_standard_sku_prefix(p_s)
+                    core_e = strip_standard_sku_prefix(e_s)
+                    if g_p and g_e and g_p == g_e and core_p and core_e and core_p == core_e:
+                        is_match = True
+                    else:
+                        is_match = False
                 status = "✅ Match" if is_match else "❌ Mismatch"
             else:
                 status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
