@@ -2821,9 +2821,14 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                                 break
                 excel_row = best_cand if best_cand is not None else candidates[-1]
 
-        # 3. Fallback to lookup by Barcode/GTIN if SKU is not found
+        # 3. Fallback to lookup by Barcode/GTIN if SKU is not found (with gender compatibility check)
         if excel_row is None and pdf_barcode_norm:
-            excel_row = excel_idx_barcode.get(pdf_barcode_norm)
+            cand_row = excel_idx_barcode.get(pdf_barcode_norm)
+            if cand_row is not None:
+                cand_gender = cand_row.get(category_col) or cand_row.get("Gender") or cand_row.get("GENDER")
+                sku_g = detect_gender_from_sku(pdf_sku_norm) or detect_gender_from_sku(tag.get("SKU"))
+                if not cand_gender or not sku_g or gender_matches(cand_gender, sku_g):
+                    excel_row = cand_row
 
         # 3. Fallback: match by Style + Color + Size + Batch (prevent matching different batch variants)
         if excel_row is None:
@@ -2968,6 +2973,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
             elif field_name == "Category":
                 pdf_val = tag.get("Category")
                 excel_val = excel_row.get(excel_col) if (excel_row is not None and excel_col) else None
+                tag_gender = detect_gender_from_sku(tag.get("SKU") or pdf_sku_norm)
+                if excel_val and tag_gender and not gender_matches(excel_val, tag_gender):
+                    excel_val = None
                 if not excel_val or pd.isna(excel_val) or str(excel_val).strip() == "" or str(excel_val).strip().upper() in ["NAN", "NONE"]:
                     g_cat = get_updated_category(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
                     if g_cat:
@@ -3181,6 +3189,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     status = "❌ Not found in Excel"
                 else:
                     status = "❌ Mismatch"
+            elif field_name == "Category":
+                p_c = normalize_category_value(pdf_val)
+                e_c = normalize_category_value(excel_val)
+                is_match = (
+                    p_c == e_c
+                    or (p_c in ["KIDS", "BOYS", "GIRLS"] and e_c in ["KIDS", "BOYS", "GIRLS"])
+                    or gender_matches(excel_val, p_c)
+                )
+                status = "✅ Match" if is_match else "❌ Mismatch"
             else:
                 status = "✅ Match" if pdf_norm == excel_norm else "❌ Mismatch"
             report_rows.append({
