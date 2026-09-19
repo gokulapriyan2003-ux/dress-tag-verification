@@ -560,8 +560,19 @@ def normalize_text(x):
         "TRACKPANT": "TRACK PANT",
         "TRACKPANTS": "TRACK PANT",
         "TRACK PANTS": "TRACK PANT",
+        "CARGOPANT": "CARGO PANT",
+        "CARGOPANTS": "CARGO PANT",
+        "CARGO PANTS": "CARGO PANT",
+        "CARGOSHORT": "CARGO SHORT",
+        "CARGOSHORTS": "CARGO SHORT",
+        "CARGO SHORTS": "CARGO SHORT",
+        "SWEATPANT": "SWEAT PANT",
+        "SWEATPANTS": "SWEAT PANT",
+        "SWEAT PANTS": "SWEAT PANT",
         "TSHIRT": "T SHIRT",
         "TSHIRTS": "T SHIRT",
+        "CREWNECK": "CREW NECK",
+        "CREWNECKS": "CREW NECK",
         "PANTS": "PANT",
         "JOGGERS": "JOGGER",
         "SHORTS": "SHORT",
@@ -2613,8 +2624,8 @@ def extract_style_and_size_from_sku(sku_str):
 
 
 PRODUCT_GROUPS = [
-    {"PANT", "JOGGER", "LOWER", "TIGHT", "LEGGING", "CAPRI"},
-    {"SHORT"},
+    {"PANT", "JOGGER", "LOWER", "TIGHT", "LEGGING", "CAPRI", "CARGOPANT", "TRACKPANT"},
+    {"SHORT", "CARGOSHORT"},
     {"SHIRT", "TEE", "POLO", "CREWNECK", "JACKET", "HOODIE", "SWEATSHIRT", "BRA"},
     {"SOCKS"},
     {"SHOE"},
@@ -2622,8 +2633,8 @@ PRODUCT_GROUPS = [
 ]
 
 CLEAN_PRODUCT_NOUNS = {
-    "PANT", "JOGGER", "LOWER", "TIGHT", "LEGGING", "CAPRI",
-    "SHORT",
+    "PANT", "JOGGER", "LOWER", "TIGHT", "LEGGING", "CAPRI", "CARGOPANT", "TRACKPANT",
+    "SHORT", "CARGOSHORT",
     "SHIRT", "TEE", "POLO", "CREWNECK", "JACKET", "HOODIE", "SWEATSHIRT", "BRA",
     "SOCKS", "SHOE", "BOXER", "INNERWEAR", "BRIEF"
 }

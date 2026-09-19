@@ -48,3 +48,5 @@ Technosport SKUs follow strict prefix conventions. The verifier must ALWAYS main
   `Kid's`, `Kids Clothing`, and `Boy's` are equivalent apparel categories and must evaluate to `Match`.
 - **Garment Category Prefix Typo Tolerance (v3.2)**:
   In Master sheets, pants/bottomwear are occasionally entered with `WT` or `MT` instead of `WP` or `MP` (e.g. `WR134/5 WOMENS BASIC TRACKPANT` with `WTW134CHAMED` vs tag `WPW134CHAMED`). The engine recognizes they share the same gender and core SKU (`Style + Color + Size`), automatically linking and evaluating them as `✅ Match`.
+- **Compound Apparel Word Normalization (v3.3)**:
+  Compound garment terms printed with or without spaces (e.g. `CARGOPANT` vs `CARGO PANT`, `CARGOSHORT` vs `CARGO SHORT`, `TRACKPANT` vs `TRACK PANT`, `SWEATPANT` vs `SWEAT PANT`, `CREWNECK` vs `CREW NECK`) are normalized to standard multi-word format so variations evaluate seamlessly as `✅ Match`.
