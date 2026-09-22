@@ -1,9 +1,12 @@
-# Dress Tag & Master Sheet Verifier Web App (v3.0)
+# Dress Tag & Master Sheet Verifier Web App (v3.4)
 import streamlit as st
 import pandas as pd
 import openpyxl
 import os
 import sys
+import io
+import re
+import tempfile
 import importlib
 import urllib.request
 from openpyxl.styles import PatternFill
@@ -19,11 +22,6 @@ from compare_tags import (
     get_updated_mrp
 )
 
-# Cached data loaders for blazing-fast verification (< 1 second)
-@st.cache_data(show_spinner="Loading Master Excel sheet...")
-def load_cached_excel_master(file_path: str, mtime: float, sheet_name: str = None) -> pd.DataFrame:
-    return extract_excel_master(file_path, sheet_name=sheet_name)
-
 
 @st.cache_data(ttl=600, show_spinner="Fetching latest MRP Google Sheet...")
 def load_cached_gsheet(url: str, local_path: str) -> dict:
@@ -31,11 +29,15 @@ def load_cached_gsheet(url: str, local_path: str) -> dict:
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as response:
-            with open(local_path, "wb") as f:
-                f.write(response.read())
-        xls = pd.ExcelFile(local_path)
-        for name in xls.sheet_names:
-            dfs[name] = pd.read_excel(xls, sheet_name=name)
+            data = response.read()
+            xls = pd.ExcelFile(io.BytesIO(data))
+            for name in xls.sheet_names:
+                dfs[name] = pd.read_excel(xls, sheet_name=name)
+            try:
+                with open(local_path, "wb") as f:
+                    f.write(data)
+            except Exception:
+                pass
     except Exception:
         if os.path.exists(local_path):
             try:
@@ -88,113 +90,93 @@ st.markdown("""
 
 st.markdown('<div class="main-title">Dress Tag & Master Sheet Verifier</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Extract SKU fields from multi-tag PDF and validate them against Excel & Google Sheet references</div>', unsafe_allow_html=True)
-st.caption("⚡ Engine v3.3: Compound Product Name Normalization (Cargo Pant / Track Pant) Active")
+st.caption("⚡ Engine v3.4: Multi-User Portal Active (Auto Tag-Detection & In-Memory Isolation)")
 
-# Auto-detect local files
 script_dir = os.path.dirname(os.path.abspath(__file__))
-local_pdfs = [f for f in os.listdir(script_dir) if f.lower().endswith(".pdf") and not f.startswith("~$")]
-
-# Prioritize GS1 september.xlsx as the new active master sheet
-september_file = os.path.join(script_dir, "GS1 september.xlsx")
-if os.path.exists(september_file):
-    default_xlsx = september_file
-else:
-    local_xlsxs = [
-        f for f in os.listdir(script_dir)
-        if f.lower().endswith(".xlsx")
-        and not f.startswith("~$")
-        and not any(x in f.lower() for x in ["report", "google", "explore", "comparison", "bak", "old", "closed"])
-    ]
-    default_xlsx = os.path.join(script_dir, local_xlsxs[0]) if local_xlsxs else None
-
-default_pdf = os.path.join(script_dir, local_pdfs[0]) if local_pdfs else None
 
 # Layout: Sidebar configuration
-st.sidebar.header("Configuration & Local Files")
-st.sidebar.markdown("### Auto-detected files:")
-if default_pdf:
-    st.sidebar.success(f"PDF found: `{os.path.basename(default_pdf)}`")
-else:
-    st.sidebar.warning("No local PDF found in directory.")
-
-if default_xlsx:
-    st.sidebar.success(f"Excel found: `{os.path.basename(default_xlsx)}`")
-else:
-    st.sidebar.warning("No local Excel found in directory.")
-
+st.sidebar.header("Portal Configuration")
+st.sidebar.markdown("""
+**Verification Workflow:**
+1. Upload the **Tag PDF**
+2. Upload the **Master Excel Sheet**
+3. Verify or adjust the **Tag Mode**
+4. Click **Run Verification**
+""")
+sheet_name = st.sidebar.text_input("Excel Sheet Name (Optional, uses first sheet if blank)", value="")
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Clear Cache & Reload Master"):
+if st.sidebar.button("🔄 Clear Cache"):
     st.cache_data.clear()
-    st.sidebar.success("Cache cleared! Next run will reload fresh files.")
+    st.sidebar.success("Cache cleared! Next run will fetch fresh Google Sheet data.")
 
-# Step 1: Tag Verification Mode Selection (Placed BEFORE tag uploading)
-st.subheader("1. Select Tag Verification Mode")
-tag_type = st.selectbox(
-    "Tag Verification Type",
-    options=["D2C Dress tag file", "B2B Box Sticker tag file", "B2B Bundle Sticker tag file"],
-    index=0,
-    help="Select D2C Dress tag file for standard dress tags, B2B Box Sticker tag file for B2B box stickers (verifying Description), or B2B Bundle Sticker tag file for bundle stickers (verifying Color instead of Description)."
-)
-
-# Step 2: Reference File Uploaders
-st.subheader("2. Upload Reference Files")
+# Step 1: Reference File Uploaders
+st.subheader("1. Upload Reference Files")
 col1, col2 = st.columns(2)
 
 with col1:
-    pdf_file = st.file_uploader("Upload Tag PDF (Optional, defaults to local file if empty)", type=["pdf"])
+    pdf_file = st.file_uploader("Upload Tag PDF", type=["pdf"])
 with col2:
-    xlsx_file = st.file_uploader("Upload Master Excel (Optional, defaults to local file if empty)", type=["xlsx"])
+    xlsx_file = st.file_uploader("Upload Master Excel", type=["xlsx"])
 
-sheet_name = st.sidebar.text_input("Excel Sheet Name (Optional, uses first sheet if blank)", value="")
-
-# Setup paths based on uploads or local defaults
-target_pdf = None
+# Auto-detect Tag Verification Mode from PDF content
+auto_tag_type = "D2C Dress tag file"
 if pdf_file is not None:
-    if getattr(pdf_file, "size", 0) == 0 or len(pdf_file.getbuffer()) == 0:
-        st.error("❌ The uploaded PDF file is empty (0.0B). Please wait for the upload to finish or select a valid PDF file.")
-        st.stop()
-    # Save uploaded file to temp path
-    target_pdf = os.path.join(script_dir, "temp_uploaded_tags.pdf")
-    with open(target_pdf, "wb") as f:
-        f.write(pdf_file.getbuffer())
-elif default_pdf:
-    target_pdf = default_pdf
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(pdf_file.getvalue())) as p:
+            if len(p.pages) > 0:
+                p_text = (p.pages[0].extract_text() or "").upper()
+                if any(k in p_text for k in ["OUTER BOX", "BOX STICKER", "SERIALISED"]):
+                    auto_tag_type = "B2B Box Sticker tag file"
+                elif "BUNDLE" in p_text:
+                    auto_tag_type = "B2B Bundle Sticker tag file"
+    except Exception:
+        pass
 
-target_xlsx = None
-if xlsx_file is not None:
-    if getattr(xlsx_file, "size", 0) == 0 or len(xlsx_file.getbuffer()) == 0:
-        st.error("❌ The uploaded Master Excel file is empty (0.0B). Please wait for the upload to finish or select a valid Excel file.")
-        st.stop()
-    target_xlsx = os.path.join(script_dir, "temp_uploaded_master.xlsx")
-    with open(target_xlsx, "wb") as f:
-        f.write(xlsx_file.getbuffer())
-elif default_xlsx:
-    target_xlsx = default_xlsx
+# Step 2: Tag Verification Mode Selection
+st.subheader("2. Select Tag Verification Mode")
+tag_options = ["D2C Dress tag file", "B2B Box Sticker tag file", "B2B Bundle Sticker tag file"]
+default_idx = tag_options.index(auto_tag_type) if auto_tag_type in tag_options else 0
+tag_type = st.selectbox(
+    "Tag Verification Type",
+    options=tag_options,
+    index=default_idx,
+    help="Auto-detected from your PDF. You can change this if needed."
+)
 
 # Run Verification Button
 if st.button("Run Verification", type="primary"):
-    if not target_pdf or not os.path.exists(target_pdf) or os.path.getsize(target_pdf) == 0:
-        st.error("❌ Please upload a valid Tag PDF file (the current file is missing or 0.0B).")
-    elif not target_xlsx or not os.path.exists(target_xlsx) or os.path.getsize(target_xlsx) == 0:
-        st.error("❌ Please upload a valid Master Excel file (the current file is missing or 0.0B).")
+    if not pdf_file or len(pdf_file.getvalue()) == 0:
+        st.warning("⚠️ Please upload a valid Tag PDF file to proceed.")
+    elif not xlsx_file or len(xlsx_file.getvalue()) == 0:
+        st.warning("⚠️ Please upload a valid Master Excel file to proceed.")
     else:
-        with st.spinner("Processing tags..."):
-            gsheet_url = "https://docs.google.com/spreadsheets/d/1Q7nboN_Rezl807J0naA0QczTyoAQ6WM-KNmp_F26n5M/export?format=xlsx"
-            gsheet_path = os.path.join(script_dir, "google_sheet_mrp.xlsx")
-            gsheet_dfs = load_cached_gsheet(gsheet_url, gsheet_path)
-
-            # Load files
+        with st.spinner("Processing tags and master sheet..."):
+            temp_pdf = None
+            temp_xlsx = None
             try:
-                pdf_df = extract_pdf_tags(target_pdf)
-                mtime = os.path.getmtime(target_xlsx)
-                excel_df = load_cached_excel_master(target_xlsx, mtime, sheet_name if sheet_name else None)
-                
-                # Perform comparison
-                report_df = compare(pdf_df, excel_df, gsheet_dfs, tag_type=tag_type)
+                # Use unique per-session temporary files to prevent Windows file locking and cross-user collision
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f_pdf:
+                    f_pdf.write(pdf_file.getvalue())
+                    temp_pdf = f_pdf.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as f_xlsx:
+                    f_xlsx.write(xlsx_file.getvalue())
+                    temp_xlsx = f_xlsx.name
+
+                gsheet_url = "https://docs.google.com/spreadsheets/d/1Q7nboN_Rezl807J0naA0QczTyoAQ6WM-KNmp_F26n5M/export?format=xlsx"
+                gsheet_path = os.path.join(script_dir, "google_sheet_mrp.xlsx")
+                gsheet_dfs = load_cached_gsheet(gsheet_url, gsheet_path)
+
+                # Load files
+                pdf_df = extract_pdf_tags(temp_pdf)
+                excel_df = extract_excel_master(temp_xlsx, sheet_name=sheet_name if sheet_name else None)
                 
                 if len(pdf_df) == 0:
                     st.error("❌ No tags were extracted from the uploaded PDF. Please verify that this is a valid tag sheet containing 'SKU Code:' text.")
                     st.stop()
+
+                # Perform comparison
+                report_df = compare(pdf_df, excel_df, gsheet_dfs, tag_type=tag_type)
                 
                 n_mismatch = (report_df["Status"] != "✅ Match").sum()
                 n_total = len(report_df)
@@ -226,39 +208,46 @@ if st.button("Run Verification", type="primary"):
                         </div>
                     """, unsafe_allow_html=True)
                 
-                # Save Report File (Optimized: write matched rows to prevent 50,000-row memory crash)
-                out_path = os.path.join(script_dir, "tag_comparison_report.xlsx")
-                try:
-                    pdf_skus = set(pdf_df["SKU"].dropna().astype(str).str.strip().str.upper())
-                    sku_cols = [c for c in excel_df.columns if any(k in str(c).lower() for k in ["sku", "item code", "gtin"])]
-                    if sku_cols:
-                        matched_mask = excel_df[sku_cols[0]].astype(str).str.strip().str.upper().isin(pdf_skus)
-                        matched_excel = excel_df[matched_mask]
-                        if len(matched_excel) == 0:
-                            matched_excel = excel_df.head(100)
-                    else:
+                # Build Comparison Report in-memory (prevents PermissionError and cross-user file locking)
+                report_buf = io.BytesIO()
+                pdf_skus = set(pdf_df["SKU"].dropna().astype(str).str.strip().str.upper())
+                sku_cols = [c for c in excel_df.columns if any(k in str(c).lower() for k in ["sku", "item code", "gtin"])]
+                if sku_cols:
+                    matched_mask = excel_df[sku_cols[0]].astype(str).str.strip().str.upper().isin(pdf_skus)
+                    matched_excel = excel_df[matched_mask]
+                    if len(matched_excel) == 0:
                         matched_excel = excel_df.head(100)
+                else:
+                    matched_excel = excel_df.head(100)
 
-                    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-                        report_df.to_excel(writer, sheet_name="Comparison_Report", index=False)
-                        pdf_df.to_excel(writer, sheet_name="PDF_Extracted", index=False)
-                        matched_excel.to_excel(writer, sheet_name="Excel_Matched_Master", index=False)
+                with pd.ExcelWriter(report_buf, engine="openpyxl") as writer:
+                    report_df.to_excel(writer, sheet_name="Comparison_Report", index=False)
+                    pdf_df.to_excel(writer, sheet_name="PDF_Extracted", index=False)
+                    matched_excel.to_excel(writer, sheet_name="Excel_Matched_Master", index=False)
 
-                        # Color the report sheet directly in-memory to prevent BadZipFile errors
-                        workbook = writer.book
-                        worksheet = writer.sheets["Comparison_Report"]
-                        green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                        red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-                        
-                        status_col_idx = report_df.columns.get_loc("Status") + 1
-                        for row_idx in range(2, len(report_df) + 2):
-                            status_val = str(report_df.iloc[row_idx - 2].get("Status", ""))
-                            fill = green_fill if "Match" in status_val and "Mis" not in status_val and "Not found" not in status_val else red_fill
-                            for col_idx in range(1, len(report_df.columns) + 1):
-                                worksheet.cell(row=row_idx, column=col_idx).fill = fill
-                except PermissionError:
-                    st.error(f"Permission denied when writing to '{out_path}'. Please make sure it is closed in Microsoft Excel and try again.")
-                
+                    # Color the report sheet directly in-memory
+                    workbook = writer.book
+                    worksheet = writer.sheets["Comparison_Report"]
+                    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                    
+                    status_col_idx = report_df.columns.get_loc("Status") + 1
+                    for row_idx in range(2, len(report_df) + 2):
+                        status_val = str(report_df.iloc[row_idx - 2].get("Status", ""))
+                        fill = green_fill if "Match" in status_val and "Mis" not in status_val and "Not found" not in status_val else red_fill
+                        for col_idx in range(1, len(report_df.columns) + 1):
+                            worksheet.cell(row=row_idx, column=col_idx).fill = fill
+
+                excel_bytes = report_buf.getvalue()
+
+                # Optionally save a background copy to disk if not locked
+                try:
+                    out_path = os.path.join(script_dir, "tag_comparison_report.xlsx")
+                    with open(out_path, "wb") as f_out:
+                        f_out.write(excel_bytes)
+                except Exception:
+                    pass
+
                 # Show results
                 if n_mismatch == 0:
                     st.balloons()
@@ -268,34 +257,31 @@ if st.button("Run Verification", type="primary"):
                     mismatch_df = report_df[report_df["Status"] != "✅ Match"]
                     st.dataframe(mismatch_df, use_container_width=True)
 
-                # Provide Download Link
-                if os.path.exists(out_path):
-                    import re
-                    style_codes = []
-                    if "Style" in pdf_df.columns:
-                        style_codes = [str(x).strip() for x in pdf_df["Style"].dropna().unique() if str(x).strip()]
-                    elif "Lot No (Google Sheet)" in report_df.columns:
-                        style_codes = [str(x).strip() for x in report_df["Lot No (Google Sheet)"].dropna().unique() if str(x).strip()]
-                    
-                    cleaned_styles = []
-                    for code in style_codes:
-                        cleaned = re.sub(r"[\\/*?:\"<>|]", "_", code)
-                        if cleaned:
-                            cleaned_styles.append(cleaned)
-                            
-                    if cleaned_styles:
-                        dl_filename = f"{'_'.join(cleaned_styles)}_comparison_report.xlsx"
-                    else:
-                        dl_filename = "tag_comparison_report.xlsx"
-
-                    with open(out_path, "rb") as file:
-                        btn = st.download_button(
-                            label=f"Download {dl_filename}",
-                            data=file,
-                            file_name=dl_filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+                # Provide Download Button from in-memory bytes
+                style_codes = []
+                if "Style" in pdf_df.columns:
+                    style_codes = [str(x).strip() for x in pdf_df["Style"].dropna().unique() if str(x).strip()]
+                elif "Lot No (Google Sheet)" in report_df.columns:
+                    style_codes = [str(x).strip() for x in report_df["Lot No (Google Sheet)"].dropna().unique() if str(x).strip()]
                 
+                cleaned_styles = []
+                for code in style_codes:
+                    cleaned = re.sub(r"[\\/*?:\"<>|]", "_", code)
+                    if cleaned:
+                        cleaned_styles.append(cleaned)
+                        
+                if cleaned_styles:
+                    dl_filename = f"{'_'.join(cleaned_styles)}_comparison_report.xlsx"
+                else:
+                    dl_filename = "tag_comparison_report.xlsx"
+
+                st.download_button(
+                    label=f"Download {dl_filename}",
+                    data=excel_bytes,
+                    file_name=dl_filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
                 # Show full comparison table
                 with st.expander("View Full Comparison Report Details"):
                     st.dataframe(report_df, use_container_width=True)
@@ -307,3 +293,10 @@ if st.button("Run Verification", type="primary"):
                 else:
                     st.error(f"Error during processing: {ex}")
                     st.exception(ex)
+            finally:
+                if temp_pdf and os.path.exists(temp_pdf):
+                    try: os.unlink(temp_pdf)
+                    except Exception: pass
+                if temp_xlsx and os.path.exists(temp_xlsx):
+                    try: os.unlink(temp_xlsx)
+                    except Exception: pass

@@ -50,3 +50,16 @@ Technosport SKUs follow strict prefix conventions. The verifier must ALWAYS main
   In Master sheets, pants/bottomwear are occasionally entered with `WT` or `MT` instead of `WP` or `MP` (e.g. `WR134/5 WOMENS BASIC TRACKPANT` with `WTW134CHAMED` vs tag `WPW134CHAMED`). The engine recognizes they share the same gender and core SKU (`Style + Color + Size`), automatically linking and evaluating them as `✅ Match`.
 - **Compound Apparel Word Normalization (v3.3)**:
   Compound garment terms printed with or without spaces (e.g. `CARGOPANT` vs `CARGO PANT`, `CARGOSHORT` vs `CARGO SHORT`, `TRACKPANT` vs `TRACK PANT`, `SWEATPANT` vs `SWEAT PANT`, `CREWNECK` vs `CREW NECK`) are normalized to standard multi-word format so variations evaluate seamlessly as `✅ Match`.
+
+---
+
+## 4. Multi-User Portal & B2B Box Sticker Handling (v3.4)
+- **Zero Local Laptop Dependency**:
+  The portal operates purely via web uploads (`pdf_file` and `xlsx_file`). It never auto-loads or falls back to local laptop master files, guaranteeing that each warehouse user's uploaded master sheet is the sole authority for that session.
+- **In-Memory & Per-Session Temporary Isolation**:
+  Files are processed using session-isolated temporary files and downloaded directly from in-memory buffers (`io.BytesIO`). This prevents Windows file-locking `PermissionError` and stops race conditions when multiple warehouse employees verify concurrently.
+- **Automatic Tag-Type Detection**:
+  The portal inspects the first page text of the uploaded PDF to automatically switch to `"B2B Box Sticker tag file"` (detecting `OUTER BOX`, `BOX STICKER`, `SERIALISED`) or `"B2B Bundle Sticker tag file"` (detecting `BUNDLE`).
+- **B2B Box Sticker Description Extraction**:
+  On horizontal multi-sticker layouts (e.g., `M510`, `WL19`), product descriptions printed above `Lot No:` are scanned backwards past vertical reversed size badges (`M`, `L`, `LX`, `LX2`) and repeated descriptions are cleanly distributed to each sticker in the row. If descriptions are omitted on the printed tag, the engine cleanly falls back to the master sheet description.
+

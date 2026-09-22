@@ -234,16 +234,30 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 if filtered_matches:
                     has_lot_no = any(LABEL_TO_CANONICAL[lbl] == "Style:" for _, _, lbl in filtered_matches)
                     if has_lot_no and idx_line > 0:
-                        if not (page_num == 0 and idx_line < 7):
-                            prev_line = raw_lines[idx_line - 1]
-                            lots_count = sum(1 for _, _, lbl in filtered_matches if LABEL_TO_CANONICAL[lbl] == "Style:")
-                            if lots_count > 0:
-                                if not any(re.match(r"^" + re.escape(x), prev_line, re.IGNORECASE) for x in LABELS):
-                                    parts = [p.strip() for p in prev_line.split("  ") if p.strip()]
-                                    if len(parts) != lots_count:
-                                        single_desc = extract_single_desc_from_repeating(prev_line)
-                                        parts = [single_desc] * lots_count
-                                    descriptions.extend(parts)
+                        lots_count = sum(1 for _, _, lbl in filtered_matches if LABEL_TO_CANONICAL[lbl] == "Style:")
+                        if lots_count > 0:
+                            # Look backwards up to 4 lines for the true product description line
+                            target_prev_line = None
+                            for lookback in range(1, min(idx_line + 1, 5)):
+                                cand_l = raw_lines[idx_line - lookback].strip()
+                                # Skip header metadata on page 0
+                                if page_num == 0 and any(k in cand_l.upper() for k in ["BILL TO:", "SHIP TO:", "OUTER BOX"]):
+                                    break
+                                # Skip lines that start with known labels or are short size tokens (e.g. M, L, LX, LX2, 62mm)
+                                if any(re.match(r"^" + re.escape(x), cand_l, re.IGNORECASE) for x in LABELS):
+                                    continue
+                                if re.match(r"^(?:mm\d+|\d+mm|[XSML0-9]{1,4}|LX\d*)$", cand_l, re.IGNORECASE):
+                                    continue
+                                if any(c.isalpha() for c in cand_l):
+                                    target_prev_line = cand_l
+                                    break
+                            
+                            if target_prev_line:
+                                parts = [p.strip() for p in target_prev_line.split("  ") if p.strip()]
+                                if len(parts) != lots_count:
+                                    single_desc = extract_single_desc_from_repeating(target_prev_line)
+                                    parts = [single_desc] * lots_count
+                                descriptions.extend(parts)
 
                     for i, (start, end, lbl) in enumerate(filtered_matches):
                         canonical = LABEL_TO_CANONICAL[lbl]
@@ -2921,8 +2935,12 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
             if field_name == "Description":
                 pdf_val = tag.get("Description") or tag.get("Product")
-                if not pdf_val:
-                    pdf_val = desc_info
+                if not pdf_val or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() == "NAN":
+                    pdf_val = desc_info or (excel_row.get(excel_col) if excel_col else None)
+                    if not pdf_val:
+                        g_desc_val = get_updated_description(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
+                        if g_desc_val:
+                            pdf_val = g_desc_val
                 excel_val = desc_info if desc_info else (excel_row.get(excel_col) if excel_col else None)
                 if not excel_val:
                     g_desc = get_updated_description(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
