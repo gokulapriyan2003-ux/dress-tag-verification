@@ -126,7 +126,7 @@ if pdf_file is not None:
         with pdfplumber.open(io.BytesIO(pdf_file.getvalue())) as p:
             if len(p.pages) > 0:
                 p_text = (p.pages[0].extract_text() or "").upper()
-                if any(k in p_text for k in ["OUTER BOX", "BOX STICKER", "SERIALISED"]):
+                if any(k in p_text for k in ["OUTER BOX", "BOX STICKER", "POUCH STICKER", "POUCH", "SERIALISED"]):
                     auto_tag_type = "B2B Box Sticker tag file"
                 elif "BUNDLE" in p_text:
                     auto_tag_type = "B2B Bundle Sticker tag file"

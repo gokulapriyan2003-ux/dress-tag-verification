@@ -140,41 +140,60 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                 skus = []
                 for w in words:
                     text = w["text"].strip()
-                    if len(text) >= 8 and text.isupper() and any(c.isdigit() for c in text):
+                    if len(text) >= 8 and text.isupper() and any(c.isdigit() for c in text) and not text.startswith("890"):
                         skus.append(w)
-                sizes = []
-                for w in words:
-                    text = w["text"].strip().upper()
-                    vert = parse_vertical_reversed_size(text)
+                
+                # Detect Scanner Size Badges (under QR code), vertical reversed sizes, and box sticker badges
+                badges = []
+                for i, w in enumerate(words):
+                    if w["top"] < 60:
+                        continue
+                    t_raw = w["text"].strip().upper()
+                    
+                    # 1. Compound badge under scanner: e.g. XL(90-95), 2XL(100-105)
+                    m_comp = re.match(r"^([2-5]?XL|XXL|XS|SX|LX\d*|[SML])\s*\(\d+-\d+\)$", t_raw)
+                    if m_comp:
+                        badges.append({"size": clean_reverse_size(m_comp.group(1)), "x0": w["x0"], "top": w["top"], "priority": 1})
+                        continue
+                    
+                    # 2. Consecutive words under scanner: e.g. 'M' and '(70-75)', 'L' and '(80-85)'
+                    m_base = re.match(r"^([2-5]?XL|XXL|XS|SX|LX\d*|[SML])$", t_raw)
+                    if m_base and i + 1 < len(words):
+                        next_t = words[i+1]["text"].strip()
+                        if re.match(r"^\(\d+-\d+\)$", next_t) and abs(words[i+1]["top"] - w["top"]) < 8 and (words[i+1]["x0"] - w["x0"]) < 30:
+                            badges.append({"size": clean_reverse_size(m_base.group(1)), "x0": w["x0"], "top": w["top"], "priority": 1})
+                            continue
+
+                    # 3. Vertical reversed size
+                    vert = parse_vertical_reversed_size(t_raw)
                     if vert:
-                        w_copy = dict(w)
-                        w_copy["text"] = vert
-                        sizes.append(w_copy)
-                    elif text in SIZE_SET:
-                        sizes.append(w)
+                        badges.append({"size": clean_reverse_size(vert), "x0": w["x0"], "top": w["top"], "priority": 2})
+                        continue
+
+                    # 4. Standalone box sticker size badge (e.g. M, L, LX, LX2, 2XL)
+                    # Exclude fragmented single characters inside address text
+                    if t_raw in SIZE_SET and len(t_raw) <= 4:
+                        is_isolated = True
+                        if i > 0 and abs(words[i-1]["top"] - w["top"]) < 4 and abs(w["x0"] - words[i-1]["x1"]) < 5:
+                            is_isolated = False
+                        if i + 1 < len(words) and abs(words[i+1]["top"] - w["top"]) < 4 and abs(words[i+1]["x0"] - w["x1"]) < 5:
+                            is_isolated = False
+                        if is_isolated:
+                            badges.append({"size": clean_reverse_size(t_raw), "x0": w["x0"], "top": w["top"], "priority": 3})
+
                 for sku_w in skus:
                     sku_text = sku_w["text"]
                     sku_x = sku_w["x0"]
                     sku_y = sku_w["top"]
                     
-                    best_size = None
-                    min_dist = float("inf")
-                    for sz_w in sizes:
-                        sz_text = sz_w["text"]
-                        sz_x = sz_w["x0"]
-                        sz_y = sz_w["top"]
-                        
-                        if sz_x < sku_x:
-                            continue
-                        y_diff = abs(sz_y - sku_y)
-                        if y_diff > 120:
-                            continue
-                        dist = ((sz_x - sku_x)**2 + y_diff**2)**0.5
-                        if dist < min_dist:
-                            min_dist = dist
-                            best_size = sz_text
-                    if best_size:
-                        sku_to_huge_size[sku_text] = clean_reverse_size(best_size)
+                    # Find matching badge on the same sticker (badge to the right of SKU or within sticker bounds)
+                    candidates = [
+                        b for b in badges
+                        if b["x0"] > sku_x - 30 and abs(b["top"] - sku_y) <= 80
+                    ]
+                    if candidates:
+                        candidates.sort(key=lambda b: (b["priority"], (b["x0"] - sku_x)**2 + (b["top"] - sku_y)**2))
+                        sku_to_huge_size[sku_text] = candidates[0]["size"]
     except Exception:
         pass
 
