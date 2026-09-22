@@ -159,17 +159,24 @@ if st.button("Run Verification", type="primary"):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f_pdf:
                     f_pdf.write(pdf_file.getvalue())
                     temp_pdf = f_pdf.name
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as f_xlsx:
-                    f_xlsx.write(xlsx_file.getvalue())
-                    temp_xlsx = f_xlsx.name
+                # Master Sheet session-state caching (prevents re-parsing 50,000 rows on repeated verifications)
+                master_cache_key = f"{xlsx_file.name}_{xlsx_file.size}_{sheet_name or 'auto'}"
+                if st.session_state.get("cached_master_key") == master_cache_key and "cached_master_df" in st.session_state:
+                    excel_df = st.session_state["cached_master_df"]
+                else:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as f_xlsx:
+                        f_xlsx.write(xlsx_file.getvalue())
+                        temp_xlsx = f_xlsx.name
+                    excel_df = extract_excel_master(temp_xlsx, sheet_name=sheet_name if sheet_name else None)
+                    st.session_state["cached_master_key"] = master_cache_key
+                    st.session_state["cached_master_df"] = excel_df
 
                 gsheet_url = "https://docs.google.com/spreadsheets/d/1Q7nboN_Rezl807J0naA0QczTyoAQ6WM-KNmp_F26n5M/export?format=xlsx"
                 gsheet_path = os.path.join(script_dir, "google_sheet_mrp.xlsx")
                 gsheet_dfs = load_cached_gsheet(gsheet_url, gsheet_path)
 
-                # Load files
+                # Load tags from PDF
                 pdf_df = extract_pdf_tags(temp_pdf)
-                excel_df = extract_excel_master(temp_xlsx, sheet_name=sheet_name if sheet_name else None)
                 
                 if len(pdf_df) == 0:
                     st.error("❌ No tags were extracted from the uploaded PDF. Please verify that this is a valid tag sheet containing 'SKU Code:' text.")
