@@ -3009,14 +3009,12 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_val = db_lot if db_lot and pd.notna(db_lot) and str(db_lot).strip() != "" and str(db_lot).strip().upper() != "NAN" else (tag.get("Style") or base_style_info)
             elif field_name == "Qty":
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
-                if tag_type in ["B2B Box Sticker tag file", "B2B Bundle Sticker tag file"]:
-                    g_pcs = get_updated_pcs_per_box(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
-                    if pdf_val and any(k in str(pdf_val).upper() for k in ["SET", "UNIT"]):
-                        excel_val = 1.0
-                    elif g_pcs is not None:
-                        excel_val = g_pcs
-                    else:
-                        excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
+                p_qty_num = norm_fn(pdf_val)
+                g_pcs = get_updated_pcs_per_box(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
+                if p_qty_num == "1" and pdf_val and any(k in str(pdf_val).upper() for k in ["SET", "UNIT", "N", "PC"]):
+                    excel_val = 1.0
+                elif (tag_type in ["B2B Box Sticker tag file", "B2B Bundle Sticker tag file"] or (p_qty_num and p_qty_num != "1")) and g_pcs is not None:
+                    excel_val = g_pcs
                 else:
                     excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
             elif field_name == "MRP":
@@ -3148,8 +3146,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_b_norm = normalize_barcode(excel_val)
 
                 # If missing or mismatch, directly check if PDF barcode exists anywhere in the Master Excel
-                if not excel_b_norm and pdf_b_norm and pdf_b_norm in excel_idx_barcode:
-                    found_row = excel_idx_barcode[pdf_b_norm]
+                if not excel_b_norm and pdf_b_norm and pdf_b_norm in excel_idx_barcode_index:
+                    found_row = get_row_dict(excel_idx_barcode_index[pdf_b_norm])
                     excel_val = found_row.get(barcode_col) or pdf_val
                     excel_b_norm = pdf_b_norm
             else:
