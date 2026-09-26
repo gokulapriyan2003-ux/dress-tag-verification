@@ -223,8 +223,8 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                     if not has_labels:
                         continue
 
-                # 1. Check for MRP line containing quantities (e.g. ₹589/-(1N), ₹4712/-(08Nos))
-                mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*/-\s*\(\s*(\d+)\s*(Nos?|Pcs?|N)\s*\)", line, re.IGNORECASE))
+                # 1. Check for MRP line containing quantities (e.g. ₹589/-(1N), ₹4712/-(08Nos), ₹4794/-(06Units))
+                mrp_matches = list(re.finditer(r"₹?\s*([\d,]+\.?\d*)\s*(?:/-)?\s*\(\s*(\d+)\s*(Nos?|Pcs?|Units?|Sets?|Pairs?|Boxes|Box|N|U)\.?\s*\)", line, re.IGNORECASE))
                 if mrp_matches:
                     for m in mrp_matches:
                         price = float(m.group(1).replace(",", ""))
@@ -234,7 +234,9 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                         else:
                             total_mrps.append(price)
                             pack_quantities.append(qty)
-                    continue
+                    has_other_labels = any(lbl in line.upper() for lbl in ["SKU", "LOT", "STYLE", "SIZE", "PRODUCT", "COLOR", "FIT", "NET", "HSN", "MFD"])
+                    if not has_other_labels:
+                        continue
 
                 matches = []
                 for lbl in LABELS:
@@ -2633,7 +2635,7 @@ def parse_product_name_info(prod_name_str):
     lot_no = parts[0] if parts else ""
     base_style = lot_no.split("/")[0] if "/" in lot_no else lot_no
 
-    pcs_match = re.search(r"(\d+)\s*(PCS|NOS|PACK)", str(prod_name_str), re.IGNORECASE)
+    pcs_match = re.search(r"(\d+)\s*(PCS|NOS|PACK|UNITS?|SETS?)", str(prod_name_str), re.IGNORECASE)
     if pcs_match:
         pcs_qty = int(pcs_match.group(1))
         matched_str = pcs_match.group(0)
@@ -3025,7 +3027,16 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 excel_val = g_mrp if g_mrp else (excel_row.get(mrp_col) if mrp_col else None)
             elif field_name == "Total MRP":
                 pdf_val = tag.get("Total MRP")
-                if pdf_val is None:
+                if pdf_val is None or pd.isna(pdf_val):
+                    p_mrp = tag.get("MRP")
+                    p_qty_str = norm_fn(tag.get("Net Quantity") or tag.get("Qty"))
+                    if p_mrp is not None and pd.notna(p_mrp) and p_qty_str:
+                        try:
+                            if float(p_qty_str) > 1:
+                                pdf_val = round(float(p_mrp) * float(p_qty_str), 2)
+                        except (ValueError, TypeError):
+                            pass
+                if pdf_val is None or pd.isna(pdf_val):
                     continue
                 # 1. Fetch authoritative Total MRP directly from Google Sheet (MRP.1 / PCS PER BOXES)
                 g_total_mrp = get_updated_total_mrp(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
