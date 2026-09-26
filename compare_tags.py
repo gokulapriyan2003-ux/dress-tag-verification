@@ -2098,7 +2098,7 @@ def gender_matches(row_gender, sku_gender):
 
 def strip_standard_sku_prefix(style_str):
     s = str(style_str).strip().upper()
-    prefixes = ("MCS", "WCS", "MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+    prefixes = ("MCS", "WCS", "MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "BP", "BS", "GP", "GT", "GS", "KD")
     for tl in prefixes:
         if s.startswith(tl):
             s = s[len(tl):]
@@ -2283,6 +2283,23 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
                             if match_batch_code(p_batch, gs_batch):
                                 return row
 
+    # Phase 1b: Exact Style Code + same alphabetic batch prefix (e.g. B13 -> B12 for 3XL-5XL big sizes)
+    p_batch_alpha = "".join([c for c in p_batch if c.isalpha()])
+    if p_batch_alpha:
+        for s_name, df in sheets:
+            gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
+            size_col = next((c for c in df.columns if str(c).upper().strip() == "SIZE"), None)
+            for _, row in df.iloc[::-1].iterrows():
+                gs_style = str(row.get("STYLE NO", "")).strip().upper()
+                gs_batch = str(row.get("BATCH", "")).strip().upper()
+                gs_alpha = "".join([c for c in gs_batch if c.isalpha()])
+                if gs_style and gs_style != "NAN" and gs_alpha == p_batch_alpha:
+                    if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                            if size_col is not None and sku_size and not size_matches_gsheet_size(sku_size, row.get(size_col)):
+                                continue
+                            return row
+
     # Phase 2: EXACT Style Code Match with fallback batch across all sheets (newest batch first)
     for s_name, df in sheets:
         gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
@@ -2335,7 +2352,7 @@ def find_row_by_style_and_batch(df, pdf_style, pdf_sku, tag_type="Standard Garme
 
 def clean_prefix(prefix):
     p = str(prefix).strip().upper()
-    prefixes = ("MCS", "WCS", "MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+    prefixes = ("MCS", "WCS", "MJ", "WJ", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "WP", "MP", "WB", "MB", "BT", "BP", "BS", "GP", "GT", "GS", "KD")
     for tl in prefixes:
         if p.startswith(tl):
             p = p[len(tl):]
@@ -2550,7 +2567,7 @@ def extract_sku_details_with_batch(sku_str):
                 style = prefix_style
                 for pfx in [
                     "MCS", "WCS", "MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI",
-                    "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD",
+                    "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "BP", "BS", "GP", "GT", "GS", "KD",
                     "M", "W", "K", "B", "G"
                 ]:
                     if prefix_style.startswith(pfx) and len(prefix_style) > len(pfx):
@@ -3013,9 +3030,11 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 pdf_val = tag.get("Net Quantity") or tag.get("Qty")
                 p_qty_num = norm_fn(pdf_val)
                 g_pcs = get_updated_pcs_per_box(tag.get("Style") or base_style_info, tag.get("SKU"), gsheet_dfs, tag_type=tag_type, pdf_size=tag.get("Size"))
-                if p_qty_num == "1" and pdf_val and any(k in str(pdf_val).upper() for k in ["SET", "UNIT", "N", "PC"]):
+                if p_qty_num == 1.0 and pdf_val and any(k in str(pdf_val).upper() for k in ["SET", "UNIT", "N", "PC", "PAIR"]):
                     excel_val = 1.0
-                elif (tag_type in ["B2B Box Sticker tag file", "B2B Bundle Sticker tag file"] or (p_qty_num and p_qty_num != "1")) and g_pcs is not None:
+                elif tag_type == "D2C Dress tag file" and (p_qty_num == 1.0 or p_qty_num is None):
+                    excel_val = 1.0
+                elif (tag_type in ["B2B Box Sticker tag file", "B2B Bundle Sticker tag file"] or (p_qty_num is not None and p_qty_num > 1.0)) and g_pcs is not None:
                     excel_val = g_pcs
                 else:
                     excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
@@ -3240,7 +3259,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 
                 def clean_lot_base(base):
                     b = str(base).strip().upper()
-                    two_letter = ("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "GP", "KD")
+                    two_letter = ("MT", "WT", "MS", "WS", "MV", "WV", "MI", "WI", "MJ", "WJ", "WP", "MP", "WB", "MB", "BT", "BP", "BS", "GP", "GT", "GS", "KD")
                     for tl in two_letter:
                         if b.startswith(tl):
                             b = b[len(tl):]
