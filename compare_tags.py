@@ -33,7 +33,7 @@ CANONICAL_LABELS = {
     "Color:": ["Color:", "COLOR:", "Colour:", "COLOUR:"],
     "Category:": ["Category:", "CATEGORY:"],
     "Manufactured On:": ["Manufactured On:", "MANUFACTURED ON:", "MFD :", "MFD:", "MFD ON:", "MFD ON :"],
-    "Net Quantity:": ["Net Quantity:", "NET QUANTITY:", "Net Qty:", "NET QTY:"],
+    "Net Quantity:": ["Net Quantity:", "NET QUANTITY:", "Net Quantity :", "NET QUANTITY :", "Net Qty:", "NET QTY:", "Net Qty :", "NET QTY :"],
     "HSN Code:": ["HSN Code:", "HSN CODE:"],
     "SKU Code:": ["SKU Code:", "SKU CODE:", "SKU:"],
     "SIZE :": ["SIZE :", "SIZE:", "Size:", "Size :"],
@@ -329,15 +329,13 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
             if m:
                 mrp_val = float(m.group().replace(",", ""))
 
+        style_raw = get("Style:")
+        net_qty_raw = get("Net Quantity:")
         qty_val = None
         if i < len(pack_quantities):
             qty_val = pack_quantities[i]
-        else:
-            qty_raw = get("Qty:")
-            qty_val = int(qty_raw) if qty_raw and qty_raw.isdigit() else qty_raw
-
-        style_raw = get("Style:")
-        net_qty_raw = get("Net Quantity:")
+        elif net_qty_raw:
+            qty_val = net_qty_raw
         mfd_raw = get("Manufactured On:")
         sku_val = get("SKU Code:")
         desc_val = get("Product:") or (descriptions[i] if i < len(descriptions) else None)
@@ -2533,8 +2531,10 @@ def get_updated_category(pdf_style, pdf_sku, gsheet_dfs, tag_type="Standard Garm
 
 
 def extract_sku_details_with_batch(sku_str):
-    sku = str(sku_str).strip().upper()
-    if not sku:
+    if sku_str is None or pd.isna(sku_str):
+        return None, None, None, ""
+    sku = re.sub(r"[^A-Z0-9]", "", str(sku_str).strip().upper())
+    if not sku or sku in ["NAN", "NONE"]:
         return None, None, None, ""
     n = len(sku)
 
@@ -3038,6 +3038,8 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     excel_val = g_pcs
                 else:
                     excel_val = pack_qty_info if pack_qty_info else (excel_row.get(excel_col) if excel_col else 1.0)
+                if not pdf_val or pd.isna(pdf_val) or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() in ["NAN", "NONE"]:
+                    pdf_val = excel_val
             elif field_name == "MRP":
                 pdf_val = tag.get("MRP")
                 if pdf_val is None:
@@ -3128,11 +3130,23 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                             else:
                                 excel_val = None
             elif field_name == "Size":
-                excel_sku = excel_row.get(sku_col) or pdf_sku_norm
-                if not excel_sku or str(excel_sku).strip().upper() == "NAN" or str(excel_sku).strip() == "":
+                excel_sku = excel_row.get(sku_col) if (excel_row is not None and sku_col) else None
+                if not excel_sku or pd.isna(excel_sku) or str(excel_sku).strip().upper() in ["NAN", "NONE", ""]:
                     excel_sku = pdf_sku_norm
                 _, _, extracted_size = extract_sku_details(excel_sku)
+                if not extracted_size and pdf_sku_norm:
+                    _, _, extracted_size = extract_sku_details(pdf_sku_norm)
+                if not extracted_size and tag.get("SKU"):
+                    _, _, extracted_size = extract_sku_details(tag.get("SKU"))
                 excel_val = format_size_as_tag(extracted_size) if extracted_size else None
+                if not excel_val and excel_row is not None and size_col:
+                    raw_sz = excel_row.get(size_col)
+                    if raw_sz is not None and pd.notna(raw_sz) and str(raw_sz).strip().upper() not in ["NAN", "NONE", ""]:
+                        excel_val = format_size_as_tag(raw_sz)
+                if not excel_val and prod_name_val:
+                    m_sz = re.search(r"\b(XSML|SML|MED|LAR|XLR|2XLR|3XLR|4XLR|5XLR|XXL|XXXL|2XL|3XL|4XL|5XL|XS|S|M|L|XL)\s*$", str(prod_name_val).strip(), re.IGNORECASE)
+                    if m_sz:
+                        excel_val = format_size_as_tag(m_sz.group(1))
                 if not pdf_val:
                     pdf_val = excel_val
             elif field_name == "Color":
