@@ -2306,6 +2306,9 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
             gs_style = str(row.get("STYLE NO", "")).strip().upper()
             if gs_style and gs_style != "NAN":
                 if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                    # Do not match B-batch (big size) if the tag is a standard numeric batch
+                    if not p_batch_alpha and any(c.isalpha() for c in str(row.get("BATCH", ""))):
+                        continue
                     if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
                         if size_col is not None and sku_size and not size_matches_gsheet_size(sku_size, row.get(size_col)):
                             continue
@@ -2952,7 +2955,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         elif not tag_batch and not eb:
                             excel_row = get_row_dict(r_idx)
                             break
-                if excel_row is None and scs_candidates:
+                # Only fallback to candidate with no batch (base SKU) if no exact batch matched
+                if excel_row is None and tag_batch:
+                    for ex_sku, r_idx in scs_candidates:
+                        ex_res = extract_sku_details_with_batch(ex_sku)
+                        if ex_res and ex_res[0] and not ex_res[3]:
+                            excel_row = get_row_dict(r_idx)
+                            break
+                # Only fallback to first candidate if tag itself has no batch
+                if excel_row is None and scs_candidates and not tag_batch:
                     excel_row = get_row_dict(scs_candidates[0][1])
 
         is_simulated = False
@@ -2965,7 +2976,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     "SKU": pdf_sku_norm,
                     "Size": size_code,
                     "Color": mapped_c,
-                    "Style": style
+                    "Style": tag.get("Style") or style
                 }
                 if sku_col:
                     excel_row[sku_col] = pdf_sku_norm
@@ -2976,9 +2987,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                 if color_col:
                     excel_row[color_col] = mapped_c
                 if desc_col:
-                    excel_row[desc_col] = None
+                    excel_row[desc_col] = tag.get("Description") or tag.get("Product")
                 if lot_col:
-                    excel_row[lot_col] = style
+                    excel_row[lot_col] = tag.get("Style") or style
+                if mrp_col:
+                    excel_row[mrp_col] = tag.get("MRP")
+                if total_mrp_col:
+                    excel_row[total_mrp_col] = tag.get("Total MRP")
+                if qty_col:
+                    excel_row[qty_col] = tag.get("Qty") or tag.get("Net Quantity")
             else:
                 report_rows.append({
                     "SKU": tag["SKU"],
