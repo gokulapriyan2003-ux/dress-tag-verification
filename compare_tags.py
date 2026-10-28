@@ -151,7 +151,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                     t_raw = w["text"].strip().upper()
                     
                     # 1. Compound badge under scanner: e.g. XL(90-95), 2XL(100-105)
-                    m_comp = re.match(r"^([2-5]?XL|XXL|XS|SX|LX\d*|[SML])\s*\(\d+-\d+\)$", t_raw)
+                    m_comp = re.match(r"^([2-5]?XL|XXL|XS|SX|LX\d*|[SML])\s*\(\d+-\d+(?:\s*CM)?\)$", t_raw)
                     if m_comp:
                         badges.append({"size": clean_reverse_size(m_comp.group(1)), "x0": w["x0"], "top": w["top"], "priority": 1})
                         continue
@@ -160,7 +160,7 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                     m_base = re.match(r"^([2-5]?XL|XXL|XS|SX|LX\d*|[SML])$", t_raw)
                     if m_base and i + 1 < len(words):
                         next_t = words[i+1]["text"].strip()
-                        if re.match(r"^\(\d+-\d+\)$", next_t) and abs(words[i+1]["top"] - w["top"]) < 8 and (words[i+1]["x0"] - w["x0"]) < 30:
+                        if re.match(r"^\(\d+-\d+(?:\s*CM)?\)$", next_t) and abs(words[i+1]["top"] - w["top"]) < 8 and (words[i+1]["x0"] - w["x0"]) < 50:
                             badges.append({"size": clean_reverse_size(m_base.group(1)), "x0": w["x0"], "top": w["top"], "priority": 1})
                             continue
 
@@ -173,10 +173,18 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
                     # 4. Standalone box sticker size badge (e.g. M, L, LX, LX2, 2XL)
                     # Exclude fragmented single characters inside address text
                     if t_raw in SIZE_SET and len(t_raw) <= 4:
+                        # Exclude characters if they are part of address/manufacturer keywords
+                        is_address_word = any(
+                            any(k in words[j]["text"].upper() for k in ["MANUFACTURED", "MARKETED", "TAMIL", "NADU", "TIRUPUR", "VIJAYAPURAM", "COMPLAINTS", "FEEDBACK", "EMAIL", "PHONE", "LTD", "PVT", "POST"])
+                            for j in range(max(0, i-5), min(len(words), i+6))
+                        )
+                        if is_address_word:
+                            continue
+
                         is_isolated = True
-                        if i > 0 and abs(words[i-1]["top"] - w["top"]) < 4 and abs(w["x0"] - words[i-1]["x1"]) < 5:
+                        if i > 0 and abs(words[i-1]["top"] - w["top"]) < 8 and abs(w["x0"] - words[i-1]["x1"]) < 15:
                             is_isolated = False
-                        if i + 1 < len(words) and abs(words[i+1]["top"] - w["top"]) < 4 and abs(words[i+1]["x0"] - w["x1"]) < 5:
+                        if i + 1 < len(words) and abs(words[i+1]["top"] - w["top"]) < 8 and abs(words[i+1]["x0"] - w["x1"]) < 15:
                             is_isolated = False
                         if is_isolated:
                             badges.append({"size": clean_reverse_size(t_raw), "x0": w["x0"], "top": w["top"], "priority": 3})
@@ -341,12 +349,19 @@ def extract_pdf_tags(pdf_path: str) -> pd.DataFrame:
         desc_val = get("Product:") or (descriptions[i] if i < len(descriptions) else None)
         size_val = get("SIZE :")
         if not size_val and sku_val:
-            if sku_val in sku_to_huge_size:
-                size_val = sku_to_huge_size[sku_val]
-            else:
-                _, _, ext_sz = extract_sku_details(sku_val)
-                if ext_sz:
-                    size_val = format_size_as_tag(ext_sz)
+            _, _, ext_sz = extract_sku_details(sku_val)
+            ext_tag_sz = format_size_as_tag(ext_sz) if ext_sz else None
+            huge_sz = sku_to_huge_size.get(sku_val)
+            if huge_sz:
+                # If huge_sz contradicts the SKU's own embedded size, trust the SKU embedded size
+                if ext_tag_sz and normalize_size(huge_sz) == normalize_size(ext_tag_sz):
+                    size_val = huge_sz
+                elif not ext_tag_sz:
+                    size_val = huge_sz
+                else:
+                    size_val = ext_tag_sz
+            elif ext_tag_sz:
+                size_val = ext_tag_sz
 
         rows.append({
             "Style": style_raw,
@@ -3166,6 +3181,15 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                         excel_val = format_size_as_tag(m_sz.group(1))
                 if not pdf_val:
                     pdf_val = excel_val
+
+                tag_sku = tag.get("SKU") or pdf_sku_norm
+                if tag_sku:
+                    _, _, tag_sku_sz = extract_sku_details(tag_sku)
+                    if tag_sku_sz:
+                        tag_sku_norm = normalize_size(tag_sku_sz)
+                        if excel_val and normalize_size(excel_val) == tag_sku_norm:
+                            if not pdf_val or normalize_size(pdf_val) != tag_sku_norm:
+                                pdf_val = format_size_as_tag(tag_sku_sz)
             elif field_name == "Color":
                 if tag_type == "B2B Bundle Sticker tag file":
                     pdf_val = tag.get("Description") or tag.get("Product")
