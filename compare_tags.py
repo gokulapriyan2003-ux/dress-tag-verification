@@ -2277,10 +2277,30 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
     sku_gender = detect_gender_from_sku(pdf_sku)
     p_clean_base = strip_standard_sku_prefix(p_style_base)
 
-    sheet_order = ["New MRP 26-27", "DT FINAL MRP"]
+    p_batch_alpha = "".join([c for c in p_batch if c.isalpha()])
+    if "DT" in p_batch_alpha:
+        sheet_order = ["DT FINAL MRP", "New MRP 26-27"]
+    else:
+        sheet_order = ["New MRP 26-27", "DT FINAL MRP"]
     sheets = [(s, gsheet_dfs[s]) for s in sheet_order if s in gsheet_dfs and gsheet_dfs[s] is not None]
 
-    # Phase 1: EXACT Style Code and EXACT Batch across all sheets (e.g. OR40/40)
+    # Phase 1: EXACT Style Code and EXACT Batch string across sheets (e.g. DT3 == DT3, 40 == 40)
+    if p_batch:
+        for s_name, df in sheets:
+            gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
+            size_col = next((c for c in df.columns if str(c).upper().strip() == "SIZE"), None)
+            for _, row in df.iloc[::-1].iterrows():
+                gs_style = str(row.get("STYLE NO", "")).strip().upper()
+                gs_batch = str(row.get("BATCH", "")).strip().upper()
+                if gs_style and gs_style != "NAN":
+                    if strip_standard_sku_prefix(gs_style) == p_clean_base:
+                        if gender_col is None or gender_matches(row.get(gender_col), sku_gender):
+                            if size_col is not None and sku_size and not size_matches_gsheet_size(sku_size, row.get(size_col)):
+                                continue
+                            if str(p_batch).strip() == str(gs_batch).strip():
+                                return row
+
+    # Phase 1b: EXACT Style Code and Normalized Batch match (e.g. batch numeric/alpha equivalence via match_batch_code)
     if p_batch:
         for s_name, df in sheets:
             gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
@@ -2296,8 +2316,7 @@ def find_best_gsheet_row(gsheet_dfs, pdf_style, pdf_sku, tag_type="Standard Garm
                             if match_batch_code(p_batch, gs_batch):
                                 return row
 
-    # Phase 1b: Exact Style Code + same alphabetic batch prefix (e.g. B13 -> B12 for 3XL-5XL big sizes)
-    p_batch_alpha = "".join([c for c in p_batch if c.isalpha()])
+    # Phase 1c: Exact Style Code + same alphabetic batch prefix (e.g. B13 -> B12 for 3XL-5XL big sizes)
     if p_batch_alpha:
         for s_name, df in sheets:
             gender_col = next((c for c in df.columns if str(c).upper().strip() in ["GENDER", "590"]), None)
@@ -3372,7 +3391,9 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     p_c == e_c
                     or (p_c in ["KIDS", "BOYS", "GIRLS"] and e_c in ["KIDS", "BOYS", "GIRLS"])
                     or gender_matches(excel_val, p_c)
+                    or gender_matches(pdf_val, e_c)
                 )
+                status = "✅ Match" if is_match else "❌ Mismatch"
             elif field_name == "SKU":
                 p_s = str(pdf_norm).strip().upper()
                 e_s = str(excel_norm).strip().upper()
