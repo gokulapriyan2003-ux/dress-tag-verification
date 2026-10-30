@@ -31,7 +31,12 @@ CANONICAL_LABELS = {
     "Product:": ["Product:", "PRODUCT:", "Product Name:", "PRODUCT NAME:"],
     "Fit:": ["Fit:", "FIT:"],
     "Color:": ["Color:", "COLOR:", "Colour:", "COLOUR:"],
-    "Category:": ["Category:", "CATEGORY:"],
+    "Category:": [
+        "Category:", "CATEGORY:", "Category :", "CATEGORY :",
+        "Gender:", "GENDER:", "Gender :", "GENDER :",
+        "Category/Gender:", "CATEGORY/GENDER:", "Category / Gender:", "CATEGORY / GENDER:",
+        "Cat:", "CAT:", "Cat :", "CAT :"
+    ],
     "Manufactured On:": ["Manufactured On:", "MANUFACTURED ON:", "MFD :", "MFD:", "MFD ON:", "MFD ON :"],
     "Net Quantity:": ["Net Quantity:", "NET QUANTITY:", "Net Quantity :", "NET QUANTITY :", "Net Qty:", "NET QTY:", "Net Qty :", "NET QTY :"],
     "HSN Code:": ["HSN Code:", "HSN CODE:"],
@@ -2860,6 +2865,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
 
     if tag_type == "B2B Bundle Sticker tag file":
         field_map = [
+            ("Category", category_col, normalize_category_value),
             ("Color", color_col, normalize_color),
             ("Lot No (Google Sheet)", None, normalize_lot),
             ("Lot No (GS1 Master)", lot_col, normalize_lot),
@@ -2872,6 +2878,7 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
     elif tag_type == "B2B Box Sticker tag file":
         field_map = [
             ("Description", desc_col, normalize_text),
+            ("Category", category_col, normalize_category_value),
             ("Lot No (Google Sheet)", None, normalize_lot),
             ("Lot No (GS1 Master)", lot_col, normalize_lot),
             ("Qty", qty_col, normalize_number),
@@ -3146,6 +3153,31 @@ def compare(pdf_df: pd.DataFrame, excel_df: pd.DataFrame, gsheet_dfs: dict, tag_
                     excel_val = parse_fit_from_text(prod_name) or parse_fit_from_text(prod_desc)
             elif field_name == "Category":
                 pdf_val = tag.get("Category")
+                if not pdf_val or pd.isna(pdf_val) or str(pdf_val).strip() == "" or str(pdf_val).strip().upper() in ["NAN", "NONE"]:
+                    tag_gender = detect_gender_from_sku(tag.get("SKU") or pdf_sku_norm)
+                    if tag_gender:
+                        if tag_gender == "WOMENS":
+                            pdf_val = "Women's"
+                        elif tag_gender == "MENS":
+                            pdf_val = "Men's"
+                        elif tag_gender == "BOYS":
+                            pdf_val = "Boy's"
+                        elif tag_gender == "GIRLS":
+                            pdf_val = "Girl's"
+                        elif tag_gender == "KIDS":
+                            pdf_val = "Kid's"
+                    if not pdf_val:
+                        p_desc_txt = (str(tag.get("Description") or tag.get("Product") or "")).upper()
+                        if "WOMEN" in p_desc_txt:
+                            pdf_val = "Women's"
+                        elif "MEN" in p_desc_txt:
+                            pdf_val = "Men's"
+                        elif "BOY" in p_desc_txt:
+                            pdf_val = "Boy's"
+                        elif "GIRL" in p_desc_txt:
+                            pdf_val = "Girl's"
+                        elif "KID" in p_desc_txt:
+                            pdf_val = "Kid's"
                 excel_val = excel_row.get(excel_col) if (excel_row is not None and excel_col) else None
                 tag_gender = detect_gender_from_sku(tag.get("SKU") or pdf_sku_norm)
                 if excel_val and tag_gender and not gender_matches(excel_val, tag_gender):
@@ -3492,7 +3524,7 @@ def main():
 
     if any(x in os.path.basename(pdf_path).lower() for x in ["bundle", "blank"]):
         tag_type = "B2B Bundle Sticker tag file"
-    elif any(x in os.path.basename(pdf_path).lower() for x in ["b2b", "box", "sticker"]):
+    elif any(x in os.path.basename(pdf_path).lower() for x in ["b2b", "outer box", "box sticker"]):
         tag_type = "B2B Box Sticker tag file"
     else:
         tag_type = "D2C Dress tag file"
